@@ -1,0 +1,3 @@
+[daytona]
+daytona_api_key = "dummy_value_to_pass_init_check"
+daytona_target = "us"
