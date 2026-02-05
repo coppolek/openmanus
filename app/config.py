@@ -1,8 +1,9 @@
 import json
+import os
 import threading
 import tomllib
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,14 +21,29 @@ class LLMSettings(BaseModel):
     model: str = Field(..., description="Model name")
     base_url: str = Field(..., description="API base URL")
     api_key: str = Field(..., description="API key")
-    max_tokens: int = Field(4096, description="Maximum number of tokens per request")
+    max_completion_tokens: int = Field(4096, description="Maximum number of tokens per request")
+    max_tokens: Optional[int] = Field(
+        None, description="Maximum tokens per request for providers using max_tokens"
+    )
     max_input_tokens: Optional[int] = Field(
         None,
         description="Maximum input tokens to use across all requests (None for unlimited)",
     )
     temperature: float = Field(1.0, description="Sampling temperature")
-    api_type: str = Field(..., description="Azure, Openai, or Ollama")
+    api_type: str = Field(..., description="Azure, OpenAI-compatible, or Ollama")
     api_version: str = Field(..., description="Azure Openai version if AzureOpenai")
+    response_format: Optional[Dict[str, Any]] = Field(
+        None, description="OpenAI-compatible response_format payload"
+    )
+    reasoning_effort: Optional[str] = Field(
+        None, description="Reasoning effort level (e.g., low, medium, high)"
+    )
+    extra_headers: Optional[Dict[str, str]] = Field(
+        None, description="Extra headers for OpenAI-compatible APIs"
+    )
+    extra_body: Optional[Dict[str, Any]] = Field(
+        None, description="Extra request body fields for OpenAI-compatible APIs"
+    )
 
 
 class ProxySettings(BaseModel):
@@ -230,6 +246,47 @@ class Config:
         with config_path.open("rb") as f:
             return tomllib.load(f)
 
+    @staticmethod
+    def _is_openrouter(settings: dict) -> bool:
+        api_type = (settings.get("api_type") or "").lower()
+        base_url = (settings.get("base_url") or "").lower()
+        return api_type == "openrouter" or "openrouter.ai" in base_url
+
+    @staticmethod
+    def _is_openai(settings: dict) -> bool:
+        api_type = (settings.get("api_type") or "").lower()
+        base_url = (settings.get("base_url") or "").lower()
+        return api_type == "openai" or "api.openai.com" in base_url
+
+    @staticmethod
+    def _is_placeholder(value: Optional[str]) -> bool:
+        if value is None:
+            return True
+        value = value.strip()
+        return value == "" or value.endswith("_API_KEY_PLACEHOLDER")
+
+    def _apply_env_overrides(self, llm_configs: Dict[str, dict]) -> None:
+        openai_key = os.getenv("OPENAI_API_KEY")
+        openrouter_key = os.getenv("OPENROUTER_API_KEY")
+        if not openai_key and not openrouter_key:
+            return
+
+        for _, settings in llm_configs.items():
+            if not isinstance(settings, dict):
+                continue
+            api_key = settings.get("api_key")
+
+            if (
+                openrouter_key
+                and self._is_openrouter(settings)
+                and self._is_placeholder(api_key)
+            ):
+                settings["api_key"] = openrouter_key
+                continue
+
+            if openai_key and self._is_openai(settings) and self._is_placeholder(api_key):
+                settings["api_key"] = openai_key
+
     def _load_initial_config(self):
         raw_config = self._load_config()
         base_llm = raw_config.get("llm", {})
@@ -241,11 +298,16 @@ class Config:
             "model": base_llm.get("model"),
             "base_url": base_llm.get("base_url"),
             "api_key": base_llm.get("api_key"),
-            "max_tokens": base_llm.get("max_tokens", 4096),
+            "max_completion_tokens": base_llm.get("max_completion_tokens", 4096),
+            "max_tokens": base_llm.get("max_tokens"),
             "max_input_tokens": base_llm.get("max_input_tokens"),
             "temperature": base_llm.get("temperature", 1.0),
             "api_type": base_llm.get("api_type", ""),
             "api_version": base_llm.get("api_version", ""),
+            "response_format": base_llm.get("response_format"),
+            "reasoning_effort": base_llm.get("reasoning_effort"),
+            "extra_headers": base_llm.get("extra_headers"),
+            "extra_body": base_llm.get("extra_body"),
         }
 
         # handle browser config.
@@ -326,6 +388,7 @@ class Config:
             "daytona_config": daytona_settings,
         }
 
+        self._apply_env_overrides(config_dict["llm"])
         self._config = AppConfig(**config_dict)
 
     @property

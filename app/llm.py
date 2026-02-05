@@ -31,7 +31,7 @@ from app.schema import (
 )
 
 
-REASONING_MODELS = ["o1", "o3-mini"]
+REASONING_MODELS = ["o1", "o3-mini", "gpt-5"]
 MULTIMODAL_MODELS = [
     "gpt-4-vision-preview",
     "gpt-4o",
@@ -190,12 +190,17 @@ class LLM:
             llm_config = llm_config or config.llm
             llm_config = llm_config.get(config_name, llm_config["default"])
             self.model = llm_config.model
-            self.max_tokens = llm_config.max_tokens
+            self.max_completion_tokens = llm_config.max_completion_tokens
+            self.max_tokens = getattr(llm_config, "max_tokens", None)
             self.temperature = llm_config.temperature
             self.api_type = llm_config.api_type
             self.api_key = llm_config.api_key
             self.api_version = llm_config.api_version
             self.base_url = llm_config.base_url
+            self.response_format = getattr(llm_config, "response_format", None)
+            self.reasoning_effort = getattr(llm_config, "reasoning_effort", None)
+            self.extra_headers = getattr(llm_config, "extra_headers", None)
+            self.extra_body = getattr(llm_config, "extra_body", None)
 
             # Add token counting related attributes
             self.total_input_tokens = 0
@@ -222,7 +227,13 @@ class LLM:
             elif self.api_type == "aws":
                 self.client = BedrockClient()
             else:
-                self.client = AsyncOpenAI(api_key=self.api_key, base_url=self.base_url)
+                client_kwargs = {
+                    "api_key": self.api_key,
+                    "base_url": self.base_url,
+                }
+                if self.extra_headers:
+                    client_kwargs["default_headers"] = self.extra_headers
+                self.client = AsyncOpenAI(**client_kwargs)
 
             self.token_counter = TokenCounter(self.tokenizer)
 
@@ -351,6 +362,36 @@ class LLM:
 
         return formatted_messages
 
+    def _apply_generation_params(
+        self,
+        params: dict,
+        *,
+        temperature: Optional[float],
+        tools: Optional[List[dict]] = None,
+    ) -> None:
+        if "max_tokens" not in params and "max_completion_tokens" not in params:
+            if self.max_tokens is not None:
+                params["max_tokens"] = self.max_tokens
+            else:
+                params["max_completion_tokens"] = self.max_completion_tokens
+
+        if self.model not in REASONING_MODELS and "temperature" not in params:
+            params["temperature"] = (
+                temperature if temperature is not None else self.temperature
+            )
+
+        if self.reasoning_effort and "reasoning_effort" not in params:
+            params["reasoning_effort"] = self.reasoning_effort
+
+        if self.response_format and not tools and "response_format" not in params:
+            params["response_format"] = self.response_format
+
+        if self.extra_body:
+            if isinstance(params.get("extra_body"), dict):
+                params["extra_body"] = {**self.extra_body, **params["extra_body"]}
+            elif "extra_body" not in params:
+                params["extra_body"] = self.extra_body
+
     @retry(
         wait=wait_random_exponential(min=1, max=60),
         stop=stop_after_attempt(6),
@@ -408,13 +449,9 @@ class LLM:
                 "messages": messages,
             }
 
-            if self.model in REASONING_MODELS:
-                params["max_completion_tokens"] = self.max_tokens
-            else:
-                params["max_tokens"] = self.max_tokens
-                params["temperature"] = (
-                    temperature if temperature is not None else self.temperature
-                )
+            self._apply_generation_params(
+                params, temperature=temperature, tools=None
+            )
 
             if not stream:
                 # Non-streaming request
@@ -579,14 +616,9 @@ class LLM:
                 "stream": stream,
             }
 
-            # Add model-specific parameters
-            if self.model in REASONING_MODELS:
-                params["max_completion_tokens"] = self.max_tokens
-            else:
-                params["max_tokens"] = self.max_tokens
-                params["temperature"] = (
-                    temperature if temperature is not None else self.temperature
-                )
+            self._apply_generation_params(
+                params, temperature=temperature, tools=None
+            )
 
             # Handle non-streaming request
             if not stream:
@@ -720,13 +752,9 @@ class LLM:
                 **kwargs,
             }
 
-            if self.model in REASONING_MODELS:
-                params["max_completion_tokens"] = self.max_tokens
-            else:
-                params["max_tokens"] = self.max_tokens
-                params["temperature"] = (
-                    temperature if temperature is not None else self.temperature
-                )
+            self._apply_generation_params(
+                params, temperature=temperature, tools=tools
+            )
 
             params["stream"] = False  # Always use non-streaming for tool requests
             response: ChatCompletion = await self.client.chat.completions.create(
