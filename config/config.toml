@@ -1,0 +1,23 @@
+# OpenManus Production Configuration
+# Secrets are injected via Railway environment variables using ${VAR_NAME} syntax.
+
+[llm]
+model = "${LLM_MODEL}"
+base_url = "${LLM_BASE_URL}"
+api_key = "${LLM_API_KEY}"
+max_tokens = 8192
+temperature = 0.0
+
+[llm.vision]
+model = "${LLM_MODEL}"
+base_url = "${LLM_BASE_URL}"
+api_key = "${LLM_API_KEY}"
+max_tokens = 8192
+temperature = 0.0
+
+[browser]
+headless = true
+disable_security = true
+
+[mcp]
+server_reference = "app.mcp.server"
