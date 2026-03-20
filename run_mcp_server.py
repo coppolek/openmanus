@@ -1,5 +1,8 @@
 # coding: utf-8
-# A shortcut to launch OpenManus MCP server, where its introduction also solves other import issues.
+# Launch the OpenManus MCP server.
+# Usage:
+#   stdio mode (local):  python run_mcp_server.py
+#   SSE mode (Railway):  python run_mcp_server.py --transport sse
 from app.mcp.server import MCPServer, parse_args
 
 

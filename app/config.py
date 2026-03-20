@@ -1,4 +1,6 @@
 import json
+import os
+import re
 import threading
 import tomllib
 from pathlib import Path
@@ -106,7 +108,7 @@ class SandboxSettings(BaseModel):
 
 
 class DaytonaSettings(BaseModel):
-    daytona_api_key: str
+    daytona_api_key: Optional[str] = Field(None, description="Daytona API key (optional, only needed for sandbox mode)")
     daytona_server_url: Optional[str] = Field(
         "https://app.daytona.io/api", description=""
     )
@@ -227,8 +229,15 @@ class Config:
 
     def _load_config(self) -> dict:
         config_path = self._get_config_path()
-        with config_path.open("rb") as f:
-            return tomllib.load(f)
+        # Read as text first so we can substitute ${VAR} placeholders from env
+        with config_path.open("r", encoding="utf-8") as f:
+            content = f.read()
+        # Replace all ${VAR_NAME} placeholders with environment variable values
+        for placeholder in re.findall(r"\$\{([^}]+)\}", content):
+            env_value = os.getenv(placeholder)
+            if env_value is not None:
+                content = content.replace(f"${{{placeholder}}}", env_value)
+        return tomllib.loads(content)
 
     def _load_initial_config(self):
         raw_config = self._load_config()
