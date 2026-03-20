@@ -11,14 +11,15 @@ descriptor itself rather than calling it, resulting in:
   AttributeError: 'property' object has no attribute 'get'
 """
 import asyncio
-from typing import Any, Optional, Type
+from typing import Any, Type
 
 from pydantic import Field
 
 from app.logger import logger
 from app.tool.base import BaseTool, ToolResult
 
-# The parameters schema for all AgentTool instances — a single string prompt.
+
+# The parameters schema for all AgentTool instances - a single string prompt.
 _AGENT_TOOL_PARAMETERS = {
     "type": "object",
     "properties": {
@@ -60,9 +61,7 @@ class AgentTool(BaseTool):
         agent_name = getattr(agent_class, "name", agent_class.__name__).lower()
         # Replace spaces/dashes for a clean tool name
         tool_name = f"run_{agent_name.replace('-', '_').replace(' ', '_')}"
-        agent_description = getattr(
-            agent_class, "description", "An OpenManus agent."
-        )
+        agent_description = getattr(agent_class, "description", "An OpenManus agent.")
 
         super().__init__(
             name=tool_name,
