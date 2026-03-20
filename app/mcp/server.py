@@ -1,14 +1,10 @@
-import logging
-import sys
-
-# Configure logging FIRST before any other imports that might trigger config loading
-logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stderr)])
-
 import argparse
 import asyncio
 import atexit
 import json
+import logging
 import os
+import sys
 from inspect import Parameter, Signature
 from typing import Any, Dict, Optional
 
@@ -21,6 +17,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 
+
+# Configure logging early so any import-time messages are captured.
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler(sys.stderr)])
+
 # ---------------------------------------------------------------------------
 # NOTE: Heavy imports (app.logger, agents, tools) are deferred to avoid
 # slowing down the Starlette/uvicorn startup. Railway's healthcheck fires
@@ -32,6 +32,7 @@ from starlette.routing import Mount, Route
 # ---------------------------------------------------------------------------
 # Auth Middleware
 # ---------------------------------------------------------------------------
+
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     """
@@ -50,7 +51,11 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                     {"error": "Missing Authorization header"}, status_code=401
                 )
             parts = auth_header.split()
-            if len(parts) != 2 or parts[0].lower() != "bearer" or parts[1] != auth_token:
+            if (
+                len(parts) != 2
+                or parts[0].lower() != "bearer"
+                or parts[1] != auth_token
+            ):
                 return JSONResponse(
                     {"error": "Invalid authentication credentials"}, status_code=401
                 )
@@ -59,32 +64,36 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
 
 
 # ---------------------------------------------------------------------------
-# Health Check — must be reachable IMMEDIATELY on startup
+# Health Check - must be reachable IMMEDIATELY on startup
 # ---------------------------------------------------------------------------
 
 _server_ready = False
 
+
 async def health_check(request: Request) -> JSONResponse:
     """Simple health endpoint for Railway's deployment checks."""
-    return JSONResponse({
-        "status": "ok",
-        "service": "openmanus-mcp",
-        "ready": _server_ready,
-    })
+    return JSONResponse(
+        {
+            "status": "ok",
+            "service": "openmanus-mcp",
+            "ready": _server_ready,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
 
+
 class MCPServer:
     """
     OpenManus MCP Server.
 
     Exposes two layers of tools:
-      1. High-level Agent Tools — run_manus, run_data_analysis, run_swe, run_browser
+      1. High-level Agent Tools - run_manus, run_data_analysis, run_swe, run_browser
          Each spawns a fresh, isolated agent instance per call for full autonomy.
-      2. Low-level Primitive Tools — bash, str_replace_editor, terminate
+      2. Low-level Primitive Tools - bash, str_replace_editor, terminate
          Direct tool access for callers that need fine-grained control.
 
     Agent and tool imports are deferred until register_all_tools() is called
@@ -102,7 +111,9 @@ class MCPServer:
         Uses try/except for each agent so that optional dependencies (e.g. daytona)
         don't prevent the server from starting. Missing agents are skipped gracefully.
         """
+        import importlib
         import logging as _logging
+
         _log = _logging.getLogger(__name__)
         self._logger = _log
 
@@ -117,7 +128,6 @@ class MCPServer:
         }
         for tool_name, (module_path, class_name) in agent_map.items():
             try:
-                import importlib
                 mod = importlib.import_module(module_path)
                 agent_class = getattr(mod, class_name)
                 self.tools[tool_name] = AgentTool(agent_class=agent_class)
@@ -133,7 +143,6 @@ class MCPServer:
         }
         for tool_name, (module_path, class_name) in primitive_map.items():
             try:
-                import importlib
                 mod = importlib.import_module(module_path)
                 tool_class = getattr(mod, class_name)
                 self.tools[tool_name] = tool_class()
@@ -192,7 +201,7 @@ class MCPServer:
                 param_type = param_details.get("type", "any")
                 param_desc = param_details.get("description", "")
                 docstring += (
-                    f"    {param_name} ({param_type}) {required_str}: {param_desc}\n"
+                    f"  {param_name} ({param_type}) {required_str}: {param_desc}\n"
                 )
         return docstring
 
@@ -267,32 +276,37 @@ class MCPServer:
             # FastMCP defaults to 127.0.0.1 which is unreachable from outside the container.
             host = "0.0.0.0"
 
-            # Build the Starlette app FIRST (fast — no heavy imports yet)
+            # Build the Starlette app FIRST (fast - no heavy imports yet)
             # so uvicorn can start serving /health immediately.
             app = self._build_sse_app()
 
-            # Register tools in a background task after the server is up
+            # Register tools in a background task after the server is up.
             # This ensures /health responds before the slow agent imports complete.
             async def _startup():
                 global _server_ready
                 import asyncio as _asyncio
+
                 # Small delay to let uvicorn fully bind the port
                 await _asyncio.sleep(0.5)
                 logging.info("Loading tools and agents in background...")
                 # Debug: log the actual LLM config to verify env var substitution
                 try:
                     from app.config import config as _cfg
+
                     _llm_configs = _cfg.llm
                     for _name, _llm in _llm_configs.items():
-                        logging.info(f"[CONFIG] LLM[{_name}] base_url={_llm.base_url} model={_llm.model}")
+                        logging.info(
+                            f"[CONFIG] LLM[{_name}] base_url={_llm.base_url} model={_llm.model}"
+                        )
                 except Exception as _ce:
                     logging.warning(f"[CONFIG] Could not read LLM config: {_ce}")
                 self.register_all_tools()
                 _server_ready = True
                 logging.info(
                     f"OpenManus MCP server ready on {host}:{port}\n"
-                    f"  /health  — health check\n"
-                    f"  /sse     — MCP endpoint (auth: {'enabled' if os.getenv('MCP_SERVER_AUTH_TOKEN') else 'disabled'})\n"
+                    f"  /health - health check\n"
+                    f"  /sse    - MCP endpoint "
+                    f"(auth: {'enabled' if os.getenv('MCP_SERVER_AUTH_TOKEN') else 'disabled'})\n"
                     f"  Tools: {list(self.tools.keys())}"
                 )
 
@@ -302,7 +316,7 @@ class MCPServer:
             logging.info(f"Starting uvicorn on {host}:{port} ...")
             uvicorn.run(app, host=host, port=port, log_level="info")
         else:
-            # stdio mode — load everything synchronously (no healthcheck needed)
+            # stdio mode - load everything synchronously (no healthcheck needed)
             self.register_all_tools()
             self.server.run(transport=transport)
 
