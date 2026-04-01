@@ -7,34 +7,6 @@ from pydantic import BaseModel, Field
 from app.utils.logger import logger
 
 
-# class BaseTool(ABC, BaseModel):
-#     name: str
-#     description: str
-#     parameters: Optional[dict] = None
-
-#     class Config:
-#         arbitrary_types_allowed = True
-
-#     async def __call__(self, **kwargs) -> Any:
-#         """Execute the tool with given parameters."""
-#         return await self.execute(**kwargs)
-
-#     @abstractmethod
-#     async def execute(self, **kwargs) -> Any:
-#         """Execute the tool with given parameters."""
-
-#     def to_param(self) -> Dict:
-#         """Convert tool to function call format."""
-#         return {
-#             "type": "function",
-#             "function": {
-#                 "name": self.name,
-#                 "description": self.description,
-#                 "parameters": self.parameters,
-#             },
-#         }
-
-
 class ToolResult(BaseModel):
     """Represents the result of a tool execution."""
 
@@ -71,8 +43,8 @@ class ToolResult(BaseModel):
 
     def replace(self, **kwargs):
         """Returns a new ToolResult with the given fields replaced."""
-        # return self.copy(update=kwargs)
         return type(self)(**{**self.dict(), **kwargs})
+
 
 class GuardrailCheckResult(BaseModel):
     """Represents the result of a guardrail check before tool execution."""
@@ -171,57 +143,22 @@ class BaseTool(ABC, BaseModel):
         parameters (dict): Tool parameters schema
         guardrail_provider (Optional[GuardrailProvider]): Authorization hook called before execute().
             If None, all calls are allowed by default. Default: None.
-        _schemas (Dict[str, List[ToolSchema]]): Registered method schemas
     """
 
     name: str
     description: str
     parameters: Optional[dict] = None
     guardrail_provider: Optional[GuardrailProvider] = Field(default=None, exclude=True)
-    # _schemas: Dict[str, List[ToolSchema]] = {}
 
     class Config:
         arbitrary_types_allowed = True
         underscore_attrs_are_private = False
 
-    # def __init__(self, **data):
-    #     """Initialize tool with model validation and schema registration."""
-    #     super().__init__(**data)
-    #     logger.debug(f"Initializing tool class: {self.__class__.__name__}")
-    #     self._register_schemas()
-
-    # def _register_schemas(self):
-    #     """Register schemas from all decorated methods."""
-    #     for name, method in inspect.getmembers(self, predicate=inspect.ismethod):
-    #         if hasattr(method, 'tool_schemas'):
-    #             self._schemas[name] = method.tool_schemas
-    #             logger.debug(f"Registered schemas for method '{name}' in {self.__class__.__name__}")
-
     async def __call__(self, **kwargs) -> Any:
-        """Execute the tool with given parameters."""
-        return await self.execute(**kwargs)
+        """Execute the tool with guardrail check, then delegate to execute()."""
+        return await self._run_with_guardrail(**kwargs)
 
-    @abstractmethod
-    async def execute(self, **kwargs) -> Any:
-        """Execute the tool with given parameters.
-
-        Subclasses should override this method with their actual tool logic.
-        The guardrail check (if configured) is called automatically by this base class.
-        """
-
-    async def _execute(self, **kwargs) -> ToolResult:
-        """
-        Internal execution method that runs after guardrail check passes.
-
-        Override this in subclasses instead of `execute()` if you want
-        the guardrail check to be applied automatically.
-        """
-        result = await self.execute(**kwargs)
-        if isinstance(result, ToolResult):
-            return result
-        return self.success_response(result)
-
-    async def _run_with_guardrail(self, **kwargs) -> ToolResult:
+    async def _run_with_guardrail(self, **kwargs) -> Any:
         """Execute with guardrail authorization check.
 
         This method checks the guardrail before executing the tool.
@@ -230,15 +167,21 @@ class BaseTool(ABC, BaseModel):
         if self.guardrail_provider is not None:
             check_result = await self.guardrail_provider.check(self.name, kwargs)
             if not check_result.allowed:
-                from app.utils.logger import logger
-
                 logger.warning(
                     f"Guardrail denied tool '{self.name}': {check_result.reason}"
                 )
                 return ToolResult(
                     error=f"Tool call denied by guardrail: {check_result.reason}"
                 )
-        return await self._execute(**kwargs)
+        return await self.execute(**kwargs)
+
+    @abstractmethod
+    async def execute(self, **kwargs) -> Any:
+        """Execute the tool with given parameters.
+
+        Subclasses must override this method with their actual tool logic.
+        The guardrail check (if configured) is called automatically via __call__.
+        """
 
     def to_param(self) -> Dict:
         """Convert tool to function call format.
@@ -255,14 +198,6 @@ class BaseTool(ABC, BaseModel):
             },
         }
 
-    # def get_schemas(self) -> Dict[str, List[ToolSchema]]:
-    #     """Get all registered tool schemas.
-
-    #     Returns:
-    #         Dict mapping method names to their schema definitions
-    #     """
-    #     return self._schemas
-
     def success_response(self, data: Union[Dict[str, Any], str]) -> ToolResult:
         """Create a successful tool result.
 
@@ -278,15 +213,6 @@ class BaseTool(ABC, BaseModel):
             text = json.dumps(data, indent=2)
         logger.debug(f"Created success response for {self.__class__.__name__}")
         return ToolResult(output=text)
-
-    async def execute(self, **kwargs) -> ToolResult:
-        """Execute the tool with guardrail check.
-
-        This base implementation applies the guardrail check and then
-        delegates to the subclass's actual execution logic.
-        Subclasses should override `_execute()` for their logic.
-        """
-        return await self._run_with_guardrail(**kwargs)
 
     def fail_response(self, msg: str) -> ToolResult:
         """Create a failed tool result.
