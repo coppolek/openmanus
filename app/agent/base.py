@@ -163,12 +163,17 @@ class BaseAgent(BaseModel, ABC):
     def handle_stuck_state(self):
         """Handle stuck state by adding a prompt to change strategy"""
         stuck_prompt = "\
-        Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
+        Observed stuck state (duplicate responses or repeated failures). Consider new strategies and avoid repeating ineffective paths already attempted. If tool keeps failing, try alternative tools or approaches."
         self.next_step_prompt = f"{stuck_prompt}\n{self.next_step_prompt}"
         logger.warning(f"Agent detected stuck state. Added prompt: {stuck_prompt}")
 
     def is_stuck(self) -> bool:
-        """Check if the agent is stuck in a loop by detecting duplicate content"""
+        """
+        Check if the agent is stuck using multiple criteria:
+        1. Exact duplicate assistant messages
+        2. Multiple error messages in sequence
+        3. Repeated error patterns in tool observations
+        """
         if len(self.memory.messages) < 2:
             return False
 
@@ -176,14 +181,47 @@ class BaseAgent(BaseModel, ABC):
         if not last_message.content:
             return False
 
-        # Count identical content occurrences
+        # Criterion 1: Exact duplicate messages (existing logic)
         duplicate_count = sum(
             1
             for msg in reversed(self.memory.messages[:-1])
             if msg.role == "assistant" and msg.content == last_message.content
         )
+        if duplicate_count >= self.duplicate_threshold:
+            return True
 
-        return duplicate_count >= self.duplicate_threshold
+        # Criterion 2: Multiple error messages in recent history
+        # Check if last 5 messages contain 3+ error messages
+        recent_messages = self.memory.messages[-5:]
+        error_messages = [
+            msg for msg in recent_messages
+            if msg.role == "assistant" and "Error" in msg.content
+        ]
+        if len(error_messages) >= 3:
+            logger.debug(f"Detected {len(error_messages)} error messages in recent history")
+            return True
+
+        # Criterion 3: Repeated error patterns in tool observations
+        # Check for repeated "failed" or "error" patterns suggesting tool failure loop
+        recent_assistant_messages = [
+            msg for msg in recent_messages
+            if msg.role == "assistant"
+        ]
+        error_pattern_count = sum(
+            1 for msg in recent_assistant_messages
+            if any(pattern in msg.content for pattern in [
+                "failed:",
+                "Error:",
+                "error:",
+                "not found",
+                "initialization failed"
+            ])
+        )
+        if error_pattern_count >= 3:
+            logger.debug(f"Detected repeated error patterns ({error_pattern_count} in recent messages)")
+            return True
+
+        return False
 
     @property
     def messages(self) -> List[Message]:

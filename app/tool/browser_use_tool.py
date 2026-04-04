@@ -138,6 +138,32 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             raise ValueError("Parameters cannot be empty")
         return v
 
+    def _classify_error(self, error: Exception) -> tuple[str, str]:
+        """
+        Classify error and return error type and user-friendly message.
+
+        Returns:
+            tuple: (error_type, message) where error_type is one of:
+            - 'INIT_FAILED': Playwright initialization error (fatal)
+            - 'OPERATION_FAILED': Operation execution error (may be recoverable)
+            - 'ELEMENT_NOT_FOUND': Element interaction error
+        """
+        error_str = str(error)
+
+        # Check for Playwright initialization errors
+        if any(phrase in error_str for phrase in [
+            "BrowserType.launch",
+            "Executable doesn't exist",
+            "playwright install",
+            "Browser binary not found",
+        ]):
+            return ("INIT_FAILED",
+                    "Browser initialization failed. Browser engine not available. "
+                    "Try using 'web_search' tool instead to search for information.")
+
+        # Check for operation errors
+        return ("OPERATION_FAILED", f"Browser action failed: {error_str}")
+
     async def _ensure_browser_initialized(self) -> BrowserContext:
         """Ensure browser and context are initialized."""
         if self.browser is None:
@@ -222,7 +248,17 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         """
         async with self.lock:
             try:
-                context = await self._ensure_browser_initialized()
+                # Separate try-catch for browser initialization to distinguish fatal errors
+                try:
+                    context = await self._ensure_browser_initialized()
+                except Exception as init_error:
+                    error_type, error_msg = self._classify_error(init_error)
+                    if error_type == "INIT_FAILED":
+                        # Browser initialization failed - fatal error
+                        return ToolResult(error=error_msg)
+                    else:
+                        # Other initialization errors
+                        return ToolResult(error=f"Browser initialization failed: {str(init_error)}")
 
                 # Get max content length from config
                 max_content_length = getattr(
@@ -474,7 +510,11 @@ Page content:
                     return ToolResult(error=f"Unknown action: {action}")
 
             except Exception as e:
-                return ToolResult(error=f"Browser action '{action}' failed: {str(e)}")
+                error_type, error_msg = self._classify_error(e)
+                if error_type == "INIT_FAILED":
+                    return ToolResult(error=error_msg)
+                else:
+                    return ToolResult(error=f"Browser action '{action}' failed: {error_msg}")
 
     async def get_current_state(
         self, context: Optional[BrowserContext] = None

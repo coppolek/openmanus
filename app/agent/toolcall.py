@@ -2,7 +2,7 @@ import asyncio
 import json
 from typing import Any, List, Optional, Union
 
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from app.agent.react import ReActAgent
 from app.exceptions import TokenLimitExceeded
@@ -32,9 +32,11 @@ class ToolCallAgent(ReActAgent):
 
     tool_calls: List[ToolCall] = Field(default_factory=list)
     _current_base64_image: Optional[str] = None
+    _tool_failures: dict = PrivateAttr(default_factory=dict)  # Track consecutive failures per tool
 
     max_steps: int = 30
     max_observe: Optional[Union[int, bool]] = None
+    max_tool_failures: int = 3  # Threshold for consecutive failures
 
     async def think(self) -> bool:
         """Process current state and decide next actions using tools"""
@@ -142,20 +144,32 @@ class ToolCallAgent(ReActAgent):
             # Reset base64_image for each tool call
             self._current_base64_image = None
 
+            tool_name = command.function.name
             result = await self.execute_tool(command)
+
+            # Track tool failures for consecutive error detection
+            if "Error:" in result:
+                failure_count = self._increment_tool_failure(tool_name)
+                if failure_count > self.max_tool_failures:
+                    result += f"\n⚠️ Tool '{tool_name}' has failed {failure_count} consecutive times. " \
+                             f"Try a different approach or use alternative tools."
+                    logger.warning(f"Tool '{tool_name}' has failed {failure_count} times consecutively")
+            else:
+                # Reset failure count on successful execution
+                self._reset_tool_failure(tool_name)
 
             if self.max_observe:
                 result = result[: self.max_observe]
 
             logger.info(
-                f"🎯 Tool '{command.function.name}' completed its mission! Result: {result}"
+                f"🎯 Tool '{tool_name}' completed its mission! Result: {result}"
             )
 
             # Add tool response to memory
             tool_msg = Message.tool_message(
                 content=result,
                 tool_call_id=command.id,
-                name=command.function.name,
+                name=tool_name,
                 base64_image=self._current_base64_image,
             )
             self.memory.add_message(tool_msg)
@@ -225,6 +239,21 @@ class ToolCallAgent(ReActAgent):
     def _is_special_tool(self, name: str) -> bool:
         """Check if tool name is in special tools list"""
         return name.lower() in [n.lower() for n in self.special_tool_names]
+
+    def _increment_tool_failure(self, tool_name: str) -> int:
+        """Increment failure count for a tool and return new count"""
+        if tool_name not in self._tool_failures:
+            self._tool_failures[tool_name] = 0
+        self._tool_failures[tool_name] += 1
+        return self._tool_failures[tool_name]
+
+    def _reset_tool_failure(self, tool_name: str) -> None:
+        """Reset failure count for a tool on successful execution"""
+        self._tool_failures[tool_name] = 0
+
+    def _get_tool_failure_count(self, tool_name: str) -> int:
+        """Get current failure count for a tool"""
+        return self._tool_failures.get(tool_name, 0)
 
     async def cleanup(self):
         """Clean up resources used by the agent's tools."""
