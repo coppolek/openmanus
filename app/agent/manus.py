@@ -1,3 +1,5 @@
+import os
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from pydantic import Field, model_validator
@@ -24,6 +26,36 @@ class Manus(ToolCallAgent):
     system_prompt: str = SYSTEM_PROMPT.format(directory=config.workspace_root)
     next_step_prompt: str = NEXT_STEP_PROMPT
 
+    def get_system_prompt_with_session(self) -> str:
+        """Get system prompt with session folder information."""
+        base_prompt = self.system_prompt
+        if self.session_folder:
+            session_info = (
+                f"\n\nSESSION OUTPUT FOLDER: All research outputs should be saved to: {self.session_folder}\n"
+                f"Use the following subfolder structure:\n"
+                f"- Guides/documentation: {self.session_folder}/guides/\n"
+                f"- Code files: {self.session_folder}/code/\n"
+                f"- Data files: {self.session_folder}/data/\n"
+            )
+            return base_prompt + session_info
+        return base_prompt
+
+    def get_session_path(self, subfolder: str = "") -> str:
+        """Get the full path for saving files in the session folder.
+
+        Args:
+            subfolder: One of 'guides', 'code', 'data', or empty string for session root
+
+        Returns:
+            Full path to the requested subfolder
+        """
+        if not self.session_folder:
+            return ""
+
+        if subfolder:
+            return os.path.join(self.session_folder, subfolder)
+        return self.session_folder
+
     max_observe: int = 10000
     max_steps: int = 20
 
@@ -49,6 +81,29 @@ class Manus(ToolCallAgent):
         default_factory=dict
     )  # server_id -> url/command
     _initialized: bool = False
+
+    # Session output folder for organizing research outputs
+    session_folder: Optional[str] = None
+
+    @model_validator(mode="after")
+    def initialize_session_folder(self) -> "Manus":
+        """Initialize session output folder with unique timestamp."""
+        if not self.session_folder:
+            # Generate unique session folder with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            slug = "session"  # Could be customized based on task type
+            session_path = os.path.join("output", f"{slug}_{timestamp}")
+
+            # Create the session folder and subfolders
+            os.makedirs(session_path, exist_ok=True)
+            os.makedirs(os.path.join(session_path, "guides"), exist_ok=True)
+            os.makedirs(os.path.join(session_path, "code"), exist_ok=True)
+            os.makedirs(os.path.join(session_path, "data"), exist_ok=True)
+
+            self.session_folder = session_path
+            logger.info(f"📁 Created session output folder: {session_path}")
+
+        return self
 
     @model_validator(mode="after")
     def initialize_helper(self) -> "Manus":
@@ -143,7 +198,11 @@ class Manus(ToolCallAgent):
             await self.initialize_mcp_servers()
             self._initialized = True
 
-        original_prompt = self.next_step_prompt
+        # Update system prompt with session folder information
+        original_system_prompt = self.system_prompt
+        self.system_prompt = self.get_system_prompt_with_session()
+
+        original_next_step_prompt = self.next_step_prompt
         recent_messages = self.memory.messages[-3:] if self.memory.messages else []
         browser_in_use = any(
             tc.function.name == BrowserUseTool().name
@@ -159,7 +218,8 @@ class Manus(ToolCallAgent):
 
         result = await super().think()
 
-        # Restore original prompt
-        self.next_step_prompt = original_prompt
+        # Restore original prompts
+        self.system_prompt = original_system_prompt
+        self.next_step_prompt = original_next_step_prompt
 
         return result

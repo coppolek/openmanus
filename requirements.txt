@@ -1,8 +1,9 @@
-pydantic~=2.10.6
-openai~=1.66.3
+pydantic~=2.11.5
+openai~=1.108.1
 tenacity~=9.0.0
 pyyaml~=6.0.2
 loguru~=0.7.3
+structlog~=25.1.0
 numpy
 datasets~=3.4.1
 fastapi~=0.115.11
@@ -20,7 +21,6 @@ baidusearch~=1.0.3
 duckduckgo_search~=7.5.3
 
 aiofiles~=24.1.0
-pydantic_core~=2.27.2
 colorama~=0.4.6
 playwright~=1.51.0
 
@@ -33,10 +33,14 @@ httpx>=0.27.0
 tomli>=2.0.0
 
 boto3~=1.37.18
+daytona>=0.161.0
 
 requests~=2.32.3
 beautifulsoup4~=4.13.3
-crawl4ai~=0.6.3
+crawl4ai~=0.7.4
 
 huggingface-hub~=0.29.2
-setuptools~=75.8.0
+setuptools~=80.9.0
+
+# Dependency conflict resolution
+orjson>=3.11.5
