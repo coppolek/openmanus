@@ -32,10 +32,10 @@ class Manus(ToolCallAgent):
         if self.session_folder:
             session_info = (
                 f"\n\nSESSION OUTPUT FOLDER: All research outputs should be saved to: {self.session_folder}\n"
-                f"Use the following subfolder structure:\n"
-                f"- Guides/documentation: {self.session_folder}/guides/\n"
-                f"- Code files: {self.session_folder}/code/\n"
-                f"- Data files: {self.session_folder}/data/\n"
+                f"Absolute paths for file operations:\n"
+                f"- Guides/documentation: {os.path.join(self.session_folder, 'guides')}/\n"
+                f"- Code files: {os.path.join(self.session_folder, 'code')}/\n"
+                f"- Data files: {os.path.join(self.session_folder, 'data')}/\n"
             )
             return base_prompt + session_info
         return base_prompt
@@ -92,7 +92,7 @@ class Manus(ToolCallAgent):
             # Generate unique session folder with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             slug = "session"  # Could be customized based on task type
-            session_path = os.path.join("output", f"{slug}_{timestamp}")
+            session_path = os.path.join(config.workspace_root, "output", f"{slug}_{timestamp}")
 
             # Create the session folder and subfolders
             os.makedirs(session_path, exist_ok=True)
