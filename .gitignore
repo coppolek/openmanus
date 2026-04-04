@@ -1,4 +1,8 @@
 ### Project-specific ###
+# Config with secrets
+config/config.toml
+config/config.daytona.toml
+
 # Logs
 logs/
 

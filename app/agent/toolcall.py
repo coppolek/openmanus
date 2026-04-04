@@ -196,10 +196,14 @@ class ToolCallAgent(ReActAgent):
             )
 
             return observation
-        except json.JSONDecodeError:
-            error_msg = f"Error parsing arguments for {name}: Invalid JSON format"
+        except json.JSONDecodeError as je:
+            error_msg = (
+                f"Invalid JSON format for tool '{name}'. The tool arguments could not be parsed. "
+                f"Make sure all required parameters are provided and properly formatted as JSON. "
+                f"Error details: {str(je)}"
+            )
             logger.error(
-                f"📝 Oops! The arguments for '{name}' don't make sense - invalid JSON, arguments:{command.function.arguments}"
+                f"📝 JSON parsing error for '{name}': {str(je)}\nArguments: {command.function.arguments}"
             )
             return f"Error: {error_msg}"
         except Exception as e:
