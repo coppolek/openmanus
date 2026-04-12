@@ -32,7 +32,9 @@ class ToolCallAgent(ReActAgent):
 
     tool_calls: List[ToolCall] = Field(default_factory=list)
     _current_base64_image: Optional[str] = None
-    _tool_failures: dict = PrivateAttr(default_factory=dict)  # Track consecutive failures per tool
+    _tool_failures: dict = PrivateAttr(
+        default_factory=dict
+    )  # Track consecutive failures per tool
 
     max_steps: int = 30
     max_observe: Optional[Union[int, bool]] = None
@@ -151,9 +153,13 @@ class ToolCallAgent(ReActAgent):
             if "Error:" in result:
                 failure_count = self._increment_tool_failure(tool_name)
                 if failure_count > self.max_tool_failures:
-                    result += f"\n⚠️ Tool '{tool_name}' has failed {failure_count} consecutive times. " \
-                             f"Try a different approach or use alternative tools."
-                    logger.warning(f"Tool '{tool_name}' has failed {failure_count} times consecutively")
+                    result += (
+                        f"\n⚠️ Tool '{tool_name}' has failed {failure_count} consecutive times. "
+                        f"Try a different approach or use alternative tools."
+                    )
+                    logger.warning(
+                        f"Tool '{tool_name}' has failed {failure_count} times consecutively"
+                    )
             else:
                 # Reset failure count on successful execution
                 self._reset_tool_failure(tool_name)
@@ -161,9 +167,7 @@ class ToolCallAgent(ReActAgent):
             if self.max_observe:
                 result = result[: self.max_observe]
 
-            logger.info(
-                f"🎯 Tool '{tool_name}' completed its mission! Result: {result}"
-            )
+            logger.info(f"🎯 Tool '{tool_name}' completed its mission! Result: {result}")
 
             # Add tool response to memory
             tool_msg = Message.tool_message(

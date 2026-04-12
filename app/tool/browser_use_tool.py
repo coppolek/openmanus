@@ -151,15 +151,20 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         error_str = str(error)
 
         # Check for Playwright initialization errors
-        if any(phrase in error_str for phrase in [
-            "BrowserType.launch",
-            "Executable doesn't exist",
-            "playwright install",
-            "Browser binary not found",
-        ]):
-            return ("INIT_FAILED",
-                    "Browser initialization failed. Browser engine not available. "
-                    "Try using 'web_search' tool instead to search for information.")
+        if any(
+            phrase in error_str
+            for phrase in [
+                "BrowserType.launch",
+                "Executable doesn't exist",
+                "playwright install",
+                "Browser binary not found",
+            ]
+        ):
+            return (
+                "INIT_FAILED",
+                "Browser initialization failed. Browser engine not available. "
+                "Try using 'web_search' tool instead to search for information.",
+            )
 
         # Check for operation errors
         return ("OPERATION_FAILED", f"Browser action failed: {error_str}")
@@ -258,7 +263,9 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         return ToolResult(error=error_msg)
                     else:
                         # Other initialization errors
-                        return ToolResult(error=f"Browser initialization failed: {str(init_error)}")
+                        return ToolResult(
+                            error=f"Browser initialization failed: {str(init_error)}"
+                        )
 
                 # Get max content length from config
                 max_content_length = getattr(
@@ -514,7 +521,9 @@ Page content:
                 if error_type == "INIT_FAILED":
                     return ToolResult(error=error_msg)
                 else:
-                    return ToolResult(error=f"Browser action '{action}' failed: {error_msg}")
+                    return ToolResult(
+                        error=f"Browser action '{action}' failed: {error_msg}"
+                    )
 
     async def get_current_state(
         self, context: Optional[BrowserContext] = None

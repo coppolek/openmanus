@@ -194,31 +194,39 @@ class BaseAgent(BaseModel, ABC):
         # Check if last 5 messages contain 3+ error messages
         recent_messages = self.memory.messages[-5:]
         error_messages = [
-            msg for msg in recent_messages
+            msg
+            for msg in recent_messages
             if msg.role == "assistant" and "Error" in msg.content
         ]
         if len(error_messages) >= 3:
-            logger.debug(f"Detected {len(error_messages)} error messages in recent history")
+            logger.debug(
+                f"Detected {len(error_messages)} error messages in recent history"
+            )
             return True
 
         # Criterion 3: Repeated error patterns in tool observations
         # Check for repeated "failed" or "error" patterns suggesting tool failure loop
         recent_assistant_messages = [
-            msg for msg in recent_messages
-            if msg.role == "assistant"
+            msg for msg in recent_messages if msg.role == "assistant"
         ]
         error_pattern_count = sum(
-            1 for msg in recent_assistant_messages
-            if any(pattern in msg.content for pattern in [
-                "failed:",
-                "Error:",
-                "error:",
-                "not found",
-                "initialization failed"
-            ])
+            1
+            for msg in recent_assistant_messages
+            if any(
+                pattern in msg.content
+                for pattern in [
+                    "failed:",
+                    "Error:",
+                    "error:",
+                    "not found",
+                    "initialization failed",
+                ]
+            )
         )
         if error_pattern_count >= 3:
-            logger.debug(f"Detected repeated error patterns ({error_pattern_count} in recent messages)")
+            logger.debug(
+                f"Detected repeated error patterns ({error_pattern_count} in recent messages)"
+            )
             return True
 
         return False
