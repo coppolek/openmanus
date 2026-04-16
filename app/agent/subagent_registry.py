@@ -1,4 +1,5 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
+
 
 class SubAgentBase:
     def __init__(self, name: str):
@@ -7,6 +8,7 @@ class SubAgentBase:
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "success", "agent": self.name, "task": task}
+
 
 class DevAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -17,6 +19,7 @@ class DevAgent(SubAgentBase):
             "task": task,
         }
 
+
 class AdsAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -25,6 +28,7 @@ class AdsAgent(SubAgentBase):
             "action": "analyze_ads",
             "task": task,
         }
+
 
 class WebAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,6 +39,7 @@ class WebAgent(SubAgentBase):
             "task": task,
         }
 
+
 class ContentAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -43,6 +48,7 @@ class ContentAgent(SubAgentBase):
             "action": "create_content",
             "task": task,
         }
+
 
 class MemoryAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -53,43 +59,132 @@ class MemoryAgent(SubAgentBase):
             "task": task,
         }
 
-class GeneralAgent(SubAgentBase):
-    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = str(task.get("prompt", "")).strip()
-        intent = str(task.get("intent", "general")).strip() or "general"
-        plan = task.get("plan") or []
 
-        text = prompt.lower()
-        risk_level = "low"
-        if any(x in text for x in ["delete", "drop", "shutdown", "wipe", "production"]):
-            risk_level = "high"
-        elif any(x in text for x in ["strategy", "roadmap", "prioritization", "workflow", "budget"]):
-            risk_level = "medium"
+class GeneralAgent(SubAgentBase):
+    def _normalize_prompt(self, prompt: Any) -> str:
+        return " ".join(str(prompt or "").strip().split())
+
+    def _infer_topic(self, text: str) -> str:
+        t = text.lower()
+        if any(x in t for x in ["roadmap", "quarter", "quarterly", "milestone", "priority", "prioritization"]):
+            return "roadmap"
+        if any(x in t for x in ["workflow", "process", "team", "handoff", "operation", "ops"]):
+            return "workflow"
+        if any(x in t for x in ["strategy", "long term", "long-term", "vision", "positioning"]):
+            return "strategy"
+        if any(x in t for x in ["launch", "rollout", "release", "deploy", "go live"]):
+            return "rollout"
+        if any(x in t for x in ["risk", "safer", "safe", "security", "production"]):
+            return "risk"
+        return "general"
+
+    def _infer_risk(self, text: str) -> str:
+        t = text.lower()
+        high_words = [
+            "delete", "drop", "wipe", "shutdown", "production", "prod",
+            "payment", "billing", "credential", "secret", "token",
+            "security", "legal", "customer data"
+        ]
+        medium_words = [
+            "strategy", "roadmap", "workflow", "rollout", "budget",
+            "team", "launch", "migration", "change"
+        ]
+        if any(x in t for x in high_words):
+            return "high"
+        if any(x in t for x in medium_words):
+            return "medium"
+        return "low"
+
+    def _default_plan(self, topic: str) -> List[str]:
+        plans = {
+            "roadmap": [
+                "Define target outcome and constraints",
+                "List candidate initiatives",
+                "Prioritize by impact, effort, and urgency",
+                "Sequence work into staged milestones",
+                "Assign owners, risks, and success metrics",
+            ],
+            "workflow": [
+                "Map the current workflow end to end",
+                "Identify bottlenecks, delays, and unclear ownership",
+                "Propose a simpler workflow with explicit handoffs",
+                "Define measurable operating rules and metrics",
+                "Roll out in stages and review weekly",
+            ],
+            "strategy": [
+                "Clarify the long-term objective",
+                "Compare the main strategic options and trade-offs",
+                "Choose the safest staged direction",
+                "Define execution milestones and checkpoints",
+                "Track leading indicators and revisit assumptions",
+            ],
+            "rollout": [
+                "Define rollout scope and non-goals",
+                "Identify dependencies and failure points",
+                "Create a phased rollout plan",
+                "Add rollback and monitoring checkpoints",
+                "Review results before wider release",
+            ],
+            "risk": [
+                "Identify the highest-risk actions",
+                "Reduce blast radius with staged execution",
+                "Add validation and rollback checks",
+                "Define stop conditions before execution",
+                "Document owners and escalation path",
+            ],
+            "general": [
+                "Clarify the desired result",
+                "Break the work into safe, ordered steps",
+                "Choose the highest-value first action",
+                "Define validation criteria",
+                "Review outcome and adjust",
+            ],
+        }
+        return plans.get(topic, plans["general"])
+
+    def _clean_plan(self, plan: Any, topic: str) -> List[str]:
+        if not isinstance(plan, list):
+            return self._default_plan(topic)
+
+        cleaned = []
+        for item in plan:
+            text = " ".join(str(item).strip().split())
+            if text:
+                cleaned.append(text)
+
+        generic = {"Analyze general", "Execute general", "Validate"}
+        if not cleaned or set(cleaned) == generic:
+            return self._default_plan(topic)
+
+        return cleaned[:5]
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = self._normalize_prompt(task.get("prompt", ""))
+        intent = self._normalize_prompt(task.get("intent", "general")) or "general"
+        topic = self._infer_topic(prompt)
+        plan = self._clean_plan(task.get("plan"), topic)
+        risk_level = self._infer_risk(prompt)
 
         summary = (
-            f"General reasoning created for '{prompt or 'unspecified task'}' "
-            f"under intent '{intent}'."
+            f"Request classified as {topic}. "
+            f"Goal: {prompt or 'unspecified task'}. "
+            f"Recommended approach is staged and structured."
         )
-
-        next_steps = []
-        if plan:
-            next_steps = [f"Follow plan step: {step}" for step in plan[:3]]
-        else:
-            next_steps = [
-                "Clarify outcome",
-                "Break task into steps",
-                "Execute safest first action",
-            ]
 
         return {
             "status": "success",
             "agent": self.name,
             "action": "general_reasoning",
             "summary": summary,
-            "next_steps": next_steps,
+            "next_steps": plan,
             "risk_level": risk_level,
-            "task": task,
+            "task": {
+                "prompt": prompt,
+                "intent": intent,
+                "plan": plan,
+            },
         }
+
 
 class SubAgentRegistry:
     def __init__(self):
@@ -119,10 +214,12 @@ class SubAgentRegistry:
         agent_name = self.resolve_route(path)
         return self.get(agent_name) if agent_name else None
 
-    def list_agents(self) -> list[str]:
+    def list_agents(self) -> List[str]:
         return list(self.agents.keys())
 
+
 registry = SubAgentRegistry()
+
 
 def init_registry() -> SubAgentRegistry:
     defaults = {
@@ -136,6 +233,7 @@ def init_registry() -> SubAgentRegistry:
     for name, agent in defaults.items():
         registry.register(name, agent)
     return registry
+
 
 def get_registry() -> SubAgentRegistry:
     return registry
