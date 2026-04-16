@@ -69,16 +69,28 @@ class MasterAgent:
         self.memory.save("last_subagent", route_name if subagent else "general")
         
         plans = self.planner.plan(intent, {"prompt": prompt})
+        if subagent and route_name != "general":
+            result = await subagent.execute({
+                "prompt": prompt,
+                "intent": intent,
+                "plan": plans,
+            })
+            score = self.evaluator.evaluate(result)
+            self.memory.save("last_score", score)
+            self.memory.save("last_result_source", route_name)
+            return result if score > 0.5 else None
+
         for step in plans:
             if not self.approval.check(step):
                 logger.warning(f"Step rejected: {step}")
                 continue
-            
             if self.manus:
-                result = await self.manus.run(prompt)
+                result = await self.manus.run(step)
                 score = self.evaluator.evaluate(result)
                 self.memory.save("last_score", score)
-                if score > 0.5: return result
+                self.memory.save("last_result_source", "manus")
+                if score > 0.5:
+                    return result
         return None
     
     async def cleanup(self):
