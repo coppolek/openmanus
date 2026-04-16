@@ -273,6 +273,54 @@ class DevAgent(SubAgentBase):
             "failure_action": f"cp {backup_file} {target_file}",
         }
 
+
+    def _proposal_id(self, prompt: str, focus: str, target_file: str) -> str:
+        import hashlib
+        raw = f"{prompt}|{focus}|{target_file}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+
+    def _build_patch_proposal(
+        self,
+        prompt: str,
+        focus: str,
+        target_file: str,
+        task: Dict[str, Any],
+        risk_level: str,
+        patch_strategy: str,
+    ) -> Dict[str, Any]:
+        old_text = task.get("old_text") if isinstance(task.get("old_text"), str) else "<EXACT_OLD_TEXT>"
+        new_text = task.get("new_text") if isinstance(task.get("new_text"), str) else "<NEW_TEXT>"
+
+        ready_to_apply = (
+            isinstance(old_text, str) and old_text not in {"", "<EXACT_OLD_TEXT>"}
+            and isinstance(new_text, str) and new_text != "<NEW_TEXT>"
+        )
+
+        proposal_id = self._proposal_id(prompt, focus, target_file)
+
+        return {
+            "proposal_id": proposal_id,
+            "review_required": True,
+            "review_status": "pending",
+            "target_file": target_file,
+            "focus": focus,
+            "change_summary": f"{focus} için tek dosyalı exact-text replacement önerisi.",
+            "patch_strategy": patch_strategy,
+            "old_text": old_text,
+            "new_text": new_text,
+            "exact_match_required": True,
+            "max_replacements": 1,
+            "ready_to_apply": ready_to_apply,
+            "risk_level": risk_level,
+            "review_checklist": [
+                "Hedef dosya doğru mu?",
+                "old_text tam ve eksiksiz mi?",
+                "new_text istenen son hali temsil ediyor mu?",
+                "Değişiklik yalnızca tek eşleşme üretir mi?",
+                "Rollback planı yeterli mi?",
+            ],
+        }
+
     def _apply_exact_text_once(self, target_file: str, old_text: str, new_text: str) -> Dict[str, Any]:
         from pathlib import Path
         import shutil
@@ -362,6 +410,14 @@ class DevAgent(SubAgentBase):
         executor_contract = self._executor_contract(primary_target_file, risk_level)
         auto_apply_guardrails = self._auto_apply_guardrails(risk_level)
         apply_loop = self._apply_loop(primary_target_file, focus)
+        patch_proposal = self._build_patch_proposal(
+            prompt=prompt,
+            focus=focus,
+            target_file=primary_target_file,
+            task=task,
+            risk_level=risk_level,
+            patch_strategy=patch_strategy,
+        )
 
         result = {
             "status": "success",
@@ -370,10 +426,10 @@ class DevAgent(SubAgentBase):
             "summary": (
                 f"Development request classified as {focus}. "
                 f"Goal: {prompt or 'unspecified development task'}. "
-                f"This agent is now ready for a safe targeted-replace execution path."
+                f"This agent now produces a patch proposal and requires review approval before execution."
             ),
             "focus": focus,
-            "execution_mode": "targeted_replace_executor_ready",
+            "execution_mode": "proposal_review_gate_ready",
             "primary_target_file": primary_target_file,
             "suspected_files": suspected_files,
             "patch_strategy": patch_strategy,
@@ -381,6 +437,7 @@ class DevAgent(SubAgentBase):
             "single_file_patch_plan": single_file_patch_plan,
             "executor_contract": executor_contract,
             "auto_apply_guardrails": auto_apply_guardrails,
+            "patch_proposal": patch_proposal,
             "preflight_checks": preflight_checks,
             "postflight_checks": postflight_checks,
             "rollback_plan": rollback_plan,
@@ -402,6 +459,26 @@ class DevAgent(SubAgentBase):
                     "status": "blocked",
                     "applied": False,
                     "reason": "high-risk requests require manual review before execution",
+                }
+                return result
+
+            if task.get("review_approved") is not True:
+                result["execution_result"] = {
+                    "status": "blocked",
+                    "applied": False,
+                    "reason": "review approval required before execution",
+                    "proposal_id": patch_proposal["proposal_id"],
+                }
+                return result
+
+            provided_proposal_id = task.get("proposal_id")
+            if provided_proposal_id and provided_proposal_id != patch_proposal["proposal_id"]:
+                result["execution_result"] = {
+                    "status": "blocked",
+                    "applied": False,
+                    "reason": "proposal_id mismatch",
+                    "proposal_id": patch_proposal["proposal_id"],
+                    "provided_proposal_id": provided_proposal_id,
                 }
                 return result
 
