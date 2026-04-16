@@ -11,12 +11,142 @@ class SubAgentBase:
 
 
 class DevAgent(SubAgentBase):
+    def _normalize(self, value: Any) -> str:
+        return " ".join(str(value or "").strip().split())
+
+    def _infer_dev_focus(self, prompt: str) -> str:
+        t = prompt.lower()
+        if any(x in t for x in ["build", "compile", "syntax", "import", "module", "dependency"]):
+            return "build_fix"
+        if any(x in t for x in ["test", "failing test", "assert", "pytest", "unit test"]):
+            return "test_fix"
+        if any(x in t for x in ["route", "routing", "agent", "intent", "registry"]):
+            return "agent_routing"
+        if any(x in t for x in ["refactor", "cleanup", "simplify", "stabilize"]):
+            return "refactor"
+        return "general_dev"
+
+    def _suspected_files(self, focus: str) -> List[str]:
+        mapping = {
+            "build_fix": [
+                "app/agent/master_agent.py",
+                "app/agent/subagent_registry.py",
+                "requirements.txt",
+                "pyproject.toml",
+            ],
+            "test_fix": [
+                "tests/",
+                "app/agent/master_agent.py",
+                "app/agent/subagent_registry.py",
+            ],
+            "agent_routing": [
+                "app/agent/master_agent.py",
+                "app/agent/subagent_registry.py",
+            ],
+            "refactor": [
+                "app/agent/master_agent.py",
+                "app/agent/subagent_registry.py",
+            ],
+            "general_dev": [
+                "app/agent/master_agent.py",
+                "app/agent/subagent_registry.py",
+            ],
+        }
+        return mapping.get(focus, mapping["general_dev"])
+
+    def _next_steps(self, focus: str) -> List[str]:
+        plans = {
+            "build_fix": [
+                "Read the failing area and identify the exact break point",
+                "Inspect the most likely Python files and imports",
+                "Prepare the smallest safe code change",
+                "Run syntax/build validation",
+                "Review output and iterate only if needed",
+            ],
+            "test_fix": [
+                "Read the failing test and isolate the expectation",
+                "Inspect the implementation used by that test",
+                "Apply the smallest logic correction",
+                "Run the relevant test subset",
+                "Review regressions before broader validation",
+            ],
+            "agent_routing": [
+                "Inspect intent mapping and subagent routing flow",
+                "Identify where the prompt is misclassified or dropped",
+                "Patch the routing logic with minimal blast radius",
+                "Run focused routing prompts as validation",
+                "Confirm specialized agents still behave correctly",
+            ],
+            "refactor": [
+                "Identify duplicated or unstable logic",
+                "Choose the smallest structural cleanup",
+                "Preserve external behavior while simplifying internals",
+                "Run focused validation after cleanup",
+                "Stop if behavior changes unexpectedly",
+            ],
+            "general_dev": [
+                "Clarify the requested engineering outcome",
+                "Inspect the most relevant source files",
+                "Prepare a minimal safe patch plan",
+                "Define validation commands before editing",
+                "Apply and verify in small steps",
+            ],
+        }
+        return plans.get(focus, plans["general_dev"])
+
+    def _validation_commands(self, focus: str) -> List[str]:
+        base = [
+            "python3 -m py_compile app/agent/subagent_registry.py",
+            "python3 -m py_compile app/agent/master_agent.py",
+        ]
+        if focus == "agent_routing":
+            base.append("/root/OpenManusOfficial/.venv/bin/python - <<'PY' ... routing smoke test ... PY")
+        elif focus == "test_fix":
+            base.append("pytest -q")
+        return base
+
+    def _risk_level(self, prompt: str) -> str:
+        t = prompt.lower()
+        high_words = ["delete", "drop", "wipe", "production", "secret", "token", "auth", "security"]
+        medium_words = ["routing", "agent", "build", "dependency", "test", "refactor"]
+        if any(x in t for x in high_words):
+            return "high"
+        if any(x in t for x in medium_words):
+            return "medium"
+        return "low"
+
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = self._normalize(task.get("prompt", ""))
+        intent = self._normalize(task.get("intent", "development")) or "development"
+        plan = task.get("plan") if isinstance(task.get("plan"), list) else []
+
+        focus = self._infer_dev_focus(prompt)
+        suspected_files = self._suspected_files(focus)
+        next_steps = self._next_steps(focus)
+        validation_commands = self._validation_commands(focus)
+        risk_level = self._risk_level(prompt)
+
+        summary = (
+            f"Development request classified as {focus}. "
+            f"Goal: {prompt or 'unspecified development task'}. "
+            f"Recommended approach is minimal-change diagnosis and validation."
+        )
+
         return {
             "status": "success",
             "agent": self.name,
             "action": "build_or_fix",
-            "task": task,
+            "summary": summary,
+            "focus": focus,
+            "suspected_files": suspected_files,
+            "next_steps": next_steps,
+            "validation_commands": validation_commands,
+            "risk_level": risk_level,
+            "task": {
+                "prompt": prompt,
+                "intent": intent,
+                "plan": plan,
+            },
         }
 
 
