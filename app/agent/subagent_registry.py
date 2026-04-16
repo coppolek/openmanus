@@ -16,13 +16,25 @@ class DevAgent(SubAgentBase):
 
     def _infer_dev_focus(self, prompt: str) -> str:
         t = prompt.lower()
-        if any(x in t for x in ["build", "compile", "syntax", "import", "module", "dependency"]):
+        if any(x in t for x in [
+            "build", "compile", "syntax", "import", "module", "dependency",
+            "derleme", "import hatası", "import hatasi", "bağımlılık", "bagimlilik"
+        ]):
             return "build_fix"
-        if any(x in t for x in ["test", "failing test", "assert", "pytest", "unit test"]):
+        if any(x in t for x in [
+            "test", "failing test", "assert", "pytest", "unit test",
+            "test hatası", "test hatasi", "başarısız test", "basarisiz test"
+        ]):
             return "test_fix"
-        if any(x in t for x in ["route", "routing", "agent", "intent", "registry"]):
+        if any(x in t for x in [
+            "route", "routing", "agent", "intent", "registry",
+            "yönlendirme", "yonlendirme", "ajan", "intent", "registry"
+        ]):
             return "agent_routing"
-        if any(x in t for x in ["refactor", "cleanup", "simplify", "stabilize"]):
+        if any(x in t for x in [
+            "refactor", "cleanup", "simplify", "stabilize",
+            "refactor", "temizle", "sadeleştir", "sadelestir", "stabilize"
+        ]):
             return "refactor"
         return "general_dev"
 
@@ -107,13 +119,98 @@ class DevAgent(SubAgentBase):
 
     def _risk_level(self, prompt: str) -> str:
         t = prompt.lower()
-        high_words = ["delete", "drop", "wipe", "production", "secret", "token", "auth", "security"]
-        medium_words = ["routing", "agent", "build", "dependency", "test", "refactor"]
+        high_words = [
+            "delete", "drop", "wipe", "production", "secret", "token", "auth", "security",
+            "sil", "canlı", "canli", "token", "gizli", "kimlik"
+        ]
+        medium_words = [
+            "routing", "agent", "build", "dependency", "test", "refactor",
+            "yönlendirme", "yonlendirme", "ajan", "derleme", "bağımlılık", "bagimlilik", "test"
+        ]
         if any(x in t for x in high_words):
             return "high"
         if any(x in t for x in medium_words):
             return "medium"
         return "low"
+
+    def _patch_strategy(self, focus: str) -> str:
+        strategies = {
+            "build_fix": "Limit changes to imports, references, and minimal dependency-related edits.",
+            "test_fix": "Limit changes to the failing logic path and preserve external behavior.",
+            "agent_routing": "Limit changes to intent mapping, route selection, and registry wiring only.",
+            "refactor": "Prefer structural cleanup without changing public behavior.",
+            "general_dev": "Prefer the smallest local edit with explicit validation before any broader change.",
+        }
+        return strategies.get(focus, strategies["general_dev"])
+
+    def _edit_scope(self, focus: str) -> Dict[str, Any]:
+        return {
+            "mode": "dry_run",
+            "max_files": 2 if focus in {"agent_routing", "refactor", "general_dev"} else 3,
+            "allow_new_files": False,
+            "allow_delete": False,
+            "allow_network": False,
+            "allow_secrets_access": False,
+        }
+
+    def _stop_conditions(self, risk_level: str) -> List[str]:
+        base = [
+            "Stop if more than the expected files need to change",
+            "Stop if validation fails before edit planning is complete",
+            "Stop if the requested change implies broad refactoring",
+        ]
+        if risk_level == "high":
+            base.extend([
+                "Stop before any production-facing or credential-related action",
+                "Stop if rollback is not clearly defined",
+            ])
+        return base
+
+    def _dry_run_patch_plan(self, focus: str, suspected_files: List[str]) -> List[Dict[str, str]]:
+        first = suspected_files[0] if suspected_files else "app/agent/subagent_registry.py"
+        plans = {
+            "build_fix": [
+                {
+                    "target_file": first,
+                    "change_type": "inspect_imports_and_references",
+                    "reason": "Build issues are usually caused by broken imports, names, or dependency assumptions."
+                }
+            ],
+            "test_fix": [
+                {
+                    "target_file": first,
+                    "change_type": "inspect_failing_logic_path",
+                    "reason": "The smallest safe change is usually close to the failing assertion path."
+                }
+            ],
+            "agent_routing": [
+                {
+                    "target_file": "app/agent/master_agent.py",
+                    "change_type": "inspect_intent_mapping",
+                    "reason": "Routing bugs often originate in intent-to-agent mapping."
+                },
+                {
+                    "target_file": "app/agent/subagent_registry.py",
+                    "change_type": "inspect_registry_and_agent_contracts",
+                    "reason": "Routing can fail if registry names or returned structures drift."
+                }
+            ],
+            "refactor": [
+                {
+                    "target_file": first,
+                    "change_type": "inspect_duplicate_or_unstable_logic",
+                    "reason": "Refactor work should start from the smallest repeated or fragile section."
+                }
+            ],
+            "general_dev": [
+                {
+                    "target_file": first,
+                    "change_type": "inspect_primary_execution_path",
+                    "reason": "Start with the most likely file before considering wider edits."
+                }
+            ],
+        }
+        return plans.get(focus, plans["general_dev"])
 
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         prompt = self._normalize(task.get("prompt", ""))
@@ -125,11 +222,15 @@ class DevAgent(SubAgentBase):
         next_steps = self._next_steps(focus)
         validation_commands = self._validation_commands(focus)
         risk_level = self._risk_level(prompt)
+        patch_strategy = self._patch_strategy(focus)
+        edit_scope = self._edit_scope(focus)
+        stop_conditions = self._stop_conditions(risk_level)
+        dry_run_patch_plan = self._dry_run_patch_plan(focus, suspected_files)
 
         summary = (
             f"Development request classified as {focus}. "
             f"Goal: {prompt or 'unspecified development task'}. "
-            f"Recommended approach is minimal-change diagnosis and validation."
+            f"This agent is currently in dry-run mode and will only prepare a safe patch plan."
         )
 
         return {
@@ -138,9 +239,14 @@ class DevAgent(SubAgentBase):
             "action": "build_or_fix",
             "summary": summary,
             "focus": focus,
+            "execution_mode": "dry_run",
             "suspected_files": suspected_files,
+            "patch_strategy": patch_strategy,
+            "dry_run_patch_plan": dry_run_patch_plan,
+            "edit_scope": edit_scope,
             "next_steps": next_steps,
             "validation_commands": validation_commands,
+            "stop_conditions": stop_conditions,
             "risk_level": risk_level,
             "task": {
                 "prompt": prompt,
@@ -148,6 +254,7 @@ class DevAgent(SubAgentBase):
                 "plan": plan,
             },
         }
+
 
 
 class AdsAgent(SubAgentBase):
