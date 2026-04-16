@@ -55,10 +55,39 @@ class MemoryAgent(SubAgentBase):
 
 class GeneralAgent(SubAgentBase):
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = str(task.get("prompt", "")).strip()
+        intent = str(task.get("intent", "general")).strip() or "general"
+        plan = task.get("plan") or []
+
+        text = prompt.lower()
+        risk_level = "low"
+        if any(x in text for x in ["delete", "drop", "shutdown", "wipe", "production"]):
+            risk_level = "high"
+        elif any(x in text for x in ["strategy", "roadmap", "prioritization", "workflow", "budget"]):
+            risk_level = "medium"
+
+        summary = (
+            f"General reasoning created for '{prompt or 'unspecified task'}' "
+            f"under intent '{intent}'."
+        )
+
+        next_steps = []
+        if plan:
+            next_steps = [f"Follow plan step: {step}" for step in plan[:3]]
+        else:
+            next_steps = [
+                "Clarify outcome",
+                "Break task into steps",
+                "Execute safest first action",
+            ]
+
         return {
             "status": "success",
             "agent": self.name,
             "action": "general_reasoning",
+            "summary": summary,
+            "next_steps": next_steps,
+            "risk_level": risk_level,
             "task": task,
         }
 
