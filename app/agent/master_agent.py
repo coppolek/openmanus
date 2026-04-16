@@ -62,8 +62,16 @@ class MasterAgent:
         intent = self.router.route(prompt)
         self.memory.save("last_intent", intent)
         route_name = {
+            "development": "dev",
+            "dev": "dev",
+            "advertising": "ads",
+            "ads": "ads",
+            "website": "web",
+            "web": "web",
             "content_creation": "content",
-            "memory_management": "memory"
+            "content": "content",
+            "memory_management": "memory",
+            "memory": "memory",
         }.get(intent, intent)
         subagent = get_registry().get(route_name)
         self.memory.save("last_subagent", route_name if subagent else "general")
