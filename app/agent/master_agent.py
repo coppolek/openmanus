@@ -88,18 +88,13 @@ class MasterAgent:
             self.memory.save("last_result_source", route_name)
             return result if score > 0.5 else None
 
-        for step in plans:
-            if not self.approval.check(step):
-                logger.warning(f"Step rejected: {step}")
-                continue
-            if self.manus:
-                result = await self.manus.run(step)
-                score = self.evaluator.evaluate(result)
-                self.memory.save("last_score", score)
-                self.memory.save("last_result_source", "manus")
-                if score > 0.5:
-                    return result
-        return None
+        return {
+            "status": "blocked",
+            "agent": "master",
+            "reason": "no_safe_subagent_route",
+            "intent": intent,
+            "prompt": prompt,
+        }
     
     async def cleanup(self):
         if self.manus: await self.manus.cleanup()
