@@ -199,17 +199,17 @@ class DevAgent(SubAgentBase):
         plans = {
             "build_fix": {
                 "target_file": target_file,
-                "edit_intent": "Fix imports, references, or small build-breaking logic in one file.",
+                "edit_intent": "Fix imports, references, or small build-breaking logic in a single file.",
                 "apply_mode": "single_file_only",
             },
             "test_fix": {
                 "target_file": target_file,
-                "edit_intent": "Adjust the smallest failing logic path in one file.",
+                "edit_intent": "Adjust the smallest failing logic path in a single file.",
                 "apply_mode": "single_file_only",
             },
             "agent_routing": {
                 "target_file": target_file,
-                "edit_intent": "Fix routing or intent mapping in one file before considering any second file.",
+                "edit_intent": "Fix routing or intent mapping in a single file before considering any second file.",
                 "apply_mode": "single_file_only",
             },
             "refactor": {
@@ -225,17 +225,48 @@ class DevAgent(SubAgentBase):
         }
         return plans.get(focus, plans["general_dev"])
 
+    def _executor_contract(self, target_file: str, risk_level: str) -> Dict[str, Any]:
+        return {
+            "executor_type": "python_targeted_replace",
+            "target_file": target_file,
+            "requires_backup": True,
+            "replace_mode": "exact_text_once",
+            "max_replacements": 1,
+            "rollback_on_failure": True,
+            "validation_after_write": True,
+            "placeholders": {
+                "old_text": "<EXACT_OLD_TEXT>",
+                "new_text": "<NEW_TEXT>",
+            },
+            "risk_level": risk_level,
+        }
+
+    def _auto_apply_guardrails(self, risk_level: str) -> List[str]:
+        rules = [
+            "Only one file may be edited in the first pass",
+            "Only exact-text replacement is allowed",
+            "Only one replacement may be applied",
+            "A backup file must be created first",
+            "Validation must run immediately after write",
+        ]
+        if risk_level == "high":
+            rules.extend([
+                "Do not auto-apply high-risk production or credential changes",
+                "Require manual review before execution",
+            ])
+        return rules
+
     def _apply_loop(self, target_file: str, focus: str) -> Dict[str, Any]:
         backup_file = f"{target_file}.bak"
         commands = [
             f"cp {target_file} {backup_file}",
-            f"# apply one small approved edit to {target_file}",
+            f"# replace <EXACT_OLD_TEXT> with <NEW_TEXT> exactly once in {target_file}",
         ]
         if target_file.endswith(".py"):
             commands.append(f"python3 -m py_compile {target_file}")
         commands.extend(self._postflight_checks(focus))
         return {
-            "mode": "controlled_single_file_apply_ready",
+            "mode": "targeted_replace_executor_ready",
             "target_file": target_file,
             "backup_file": backup_file,
             "commands": commands,
@@ -260,12 +291,14 @@ class DevAgent(SubAgentBase):
         rollback_plan = self._rollback_plan(primary_target_file)
         stop_conditions = self._stop_conditions(risk_level)
         single_file_patch_plan = self._single_file_patch_plan(focus, primary_target_file)
+        executor_contract = self._executor_contract(primary_target_file, risk_level)
+        auto_apply_guardrails = self._auto_apply_guardrails(risk_level)
         apply_loop = self._apply_loop(primary_target_file, focus)
 
         summary = (
             f"Development request classified as {focus}. "
             f"Goal: {prompt or 'unspecified development task'}. "
-            f"This agent is ready for a controlled single-file apply sequence with rollback."
+            f"This agent is now ready for a safe targeted-replace execution path."
         )
 
         return {
@@ -274,12 +307,14 @@ class DevAgent(SubAgentBase):
             "action": "build_or_fix",
             "summary": summary,
             "focus": focus,
-            "execution_mode": "controlled_single_file_apply_ready",
+            "execution_mode": "targeted_replace_executor_ready",
             "primary_target_file": primary_target_file,
             "suspected_files": suspected_files,
             "patch_strategy": patch_strategy,
             "allowed_operations": allowed_operations,
             "single_file_patch_plan": single_file_patch_plan,
+            "executor_contract": executor_contract,
+            "auto_apply_guardrails": auto_apply_guardrails,
             "preflight_checks": preflight_checks,
             "postflight_checks": postflight_checks,
             "rollback_plan": rollback_plan,
