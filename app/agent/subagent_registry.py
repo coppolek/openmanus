@@ -273,6 +273,74 @@ class DevAgent(SubAgentBase):
             "failure_action": f"cp {backup_file} {target_file}",
         }
 
+    def _apply_exact_text_once(self, target_file: str, old_text: str, new_text: str) -> Dict[str, Any]:
+        from pathlib import Path
+        import shutil
+        import py_compile
+
+        if not isinstance(old_text, str) or not old_text:
+            return {
+                "status": "blocked",
+                "applied": False,
+                "reason": "old_text must be a non-empty string",
+            }
+
+        if not isinstance(new_text, str):
+            return {
+                "status": "blocked",
+                "applied": False,
+                "reason": "new_text must be a string",
+            }
+
+        path = Path(target_file)
+        backup = Path(f"{target_file}.bak")
+
+        if not path.exists():
+            return {
+                "status": "blocked",
+                "applied": False,
+                "reason": f"target file not found: {target_file}",
+            }
+
+        original = path.read_text(encoding="utf-8")
+        count = original.count(old_text)
+
+        if count != 1:
+            return {
+                "status": "blocked",
+                "applied": False,
+                "reason": f"old_text must match exactly once, found {count}",
+                "target_file": target_file,
+            }
+
+        shutil.copy2(path, backup)
+
+        try:
+            updated = original.replace(old_text, new_text, 1)
+            path.write_text(updated, encoding="utf-8")
+
+            if path.suffix == ".py":
+                py_compile.compile(str(path), doraise=True)
+
+            return {
+                "status": "success",
+                "applied": True,
+                "target_file": target_file,
+                "backup_file": str(backup),
+                "match_count": count,
+                "validation": "py_compile_passed" if path.suffix == ".py" else "write_passed",
+            }
+        except Exception as e:
+            if backup.exists():
+                shutil.copy2(backup, path)
+            return {
+                "status": "rolled_back",
+                "applied": False,
+                "target_file": target_file,
+                "backup_file": str(backup),
+                "error": str(e),
+            }
+
     async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
         prompt = self._normalize(task.get("prompt", ""))
         intent = self._normalize(task.get("intent", "development")) or "development"
@@ -295,17 +363,15 @@ class DevAgent(SubAgentBase):
         auto_apply_guardrails = self._auto_apply_guardrails(risk_level)
         apply_loop = self._apply_loop(primary_target_file, focus)
 
-        summary = (
-            f"Development request classified as {focus}. "
-            f"Goal: {prompt or 'unspecified development task'}. "
-            f"This agent is now ready for a safe targeted-replace execution path."
-        )
-
-        return {
+        result = {
             "status": "success",
             "agent": self.name,
             "action": "build_or_fix",
-            "summary": summary,
+            "summary": (
+                f"Development request classified as {focus}. "
+                f"Goal: {prompt or 'unspecified development task'}. "
+                f"This agent is now ready for a safe targeted-replace execution path."
+            ),
             "focus": focus,
             "execution_mode": "targeted_replace_executor_ready",
             "primary_target_file": primary_target_file,
@@ -330,6 +396,35 @@ class DevAgent(SubAgentBase):
             },
         }
 
+        if task.get("apply_targeted_replace") is True:
+            if risk_level == "high":
+                result["execution_result"] = {
+                    "status": "blocked",
+                    "applied": False,
+                    "reason": "high-risk requests require manual review before execution",
+                }
+                return result
+
+            target_file = task.get("target_file") or primary_target_file
+            if target_file != primary_target_file:
+                result["execution_result"] = {
+                    "status": "blocked",
+                    "applied": False,
+                    "reason": "first pass must use the primary_target_file only",
+                    "target_file": target_file,
+                    "primary_target_file": primary_target_file,
+                }
+                return result
+
+            old_text = task.get("old_text")
+            new_text = task.get("new_text")
+            result["execution_result"] = self._apply_exact_text_once(
+                target_file=target_file,
+                old_text=old_text,
+                new_text=new_text,
+            )
+
+        return result
 
 
 class AdsAgent(SubAgentBase):
