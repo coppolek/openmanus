@@ -66,15 +66,30 @@ class GeneralAgent(SubAgentBase):
 
     def _infer_topic(self, text: str) -> str:
         t = text.lower()
-        if any(x in t for x in ["roadmap", "quarter", "quarterly", "milestone", "priority", "prioritization"]):
+        if any(x in t for x in [
+            "roadmap", "quarter", "quarterly", "milestone", "priority", "prioritization",
+            "yol haritası", "yol haritasi", "çeyrek", "ceyrek", "öncelik", "oncelik", "önceliklendirme", "onceliklendirme"
+        ]):
             return "roadmap"
-        if any(x in t for x in ["workflow", "process", "team", "handoff", "operation", "ops"]):
+        if any(x in t for x in [
+            "workflow", "process", "team", "handoff", "operation", "ops",
+            "iş akışı", "is akisi", "iş akisi", "sureç", "süreç", "ekip", "devir"
+        ]):
             return "workflow"
-        if any(x in t for x in ["strategy", "long term", "long-term", "vision", "positioning"]):
+        if any(x in t for x in [
+            "strategy", "long term", "long-term", "vision", "positioning",
+            "strateji", "uzun vadeli", "vizyon", "konumlandırma", "konumlandirma"
+        ]):
             return "strategy"
-        if any(x in t for x in ["launch", "rollout", "release", "deploy", "go live"]):
+        if any(x in t for x in [
+            "launch", "rollout", "release", "deploy", "go live",
+            "yayın", "yayin", "yayına al", "yayina al", "sürüm", "surum", "dağıtım", "dagitim"
+        ]):
             return "rollout"
-        if any(x in t for x in ["risk", "safer", "safe", "security", "production"]):
+        if any(x in t for x in [
+            "risk", "safer", "safe", "security", "production",
+            "riskli", "güvenli", "guvenli", "güvenlik", "guvenlik", "canlı", "canli", "prod"
+        ]):
             return "risk"
         return "general"
 
@@ -83,11 +98,14 @@ class GeneralAgent(SubAgentBase):
         high_words = [
             "delete", "drop", "wipe", "shutdown", "production", "prod",
             "payment", "billing", "credential", "secret", "token",
-            "security", "legal", "customer data"
+            "security", "legal", "customer data",
+            "sil", "kaldır", "kaldir", "canlı", "canli", "ödeme", "odeme", "müşteri verisi", "musteri verisi"
         ]
         medium_words = [
             "strategy", "roadmap", "workflow", "rollout", "budget",
-            "team", "launch", "migration", "change"
+            "team", "launch", "migration", "change",
+            "strateji", "yol haritası", "yol haritasi", "iş akışı", "is akisi",
+            "ekip", "yayın", "yayin", "geçiş", "gecis", "değişim", "degisim", "çeyrek", "ceyrek"
         ]
         if any(x in t for x in high_words):
             return "high"
