@@ -1,8 +1,59 @@
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
+
+class SubAgentBase:
+    def __init__(self, name: str):
+        self.name = name
+        self.config: Dict[str, Any] = {}
+
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {"status": "success", "agent": self.name, "task": task}
+
+class DevAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "build_or_fix",
+            "task": task,
+        }
+
+class AdsAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "analyze_ads",
+            "task": task,
+        }
+
+class WebAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "research_web",
+            "task": task,
+        }
+
+class ContentAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "create_content",
+            "task": task,
+        }
+
+class MemoryAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "manage_memory",
+            "task": task,
+        }
 
 class SubAgentRegistry:
-    """Minimal subagent registry for managing and routing to subagents"""
-    
     def __init__(self):
         self.agents: Dict[str, Any] = {}
         self.routes: Dict[str, str] = {
@@ -10,55 +61,41 @@ class SubAgentRegistry:
             "/ads": "ads",
             "/web": "web",
             "/content": "content",
-            "/memory": "memory"
+            "/memory": "memory",
         }
-    
+
     def register(self, name: str, agent: Any) -> None:
-        """Register a subagent"""
         self.agents[name] = agent
-    
+
     def get(self, name: str) -> Optional[Any]:
-        """Get a registered subagent"""
         return self.agents.get(name)
-    
+
     def resolve_route(self, path: str) -> Optional[str]:
-        """Resolve path to subagent name"""
         for route, agent_name in self.routes.items():
             if path.startswith(route):
                 return agent_name
         return None
-    
+
     def route_to_agent(self, path: str) -> Optional[Any]:
-        """Route path to appropriate subagent"""
         agent_name = self.resolve_route(path)
-        if agent_name:
-            return self.get(agent_name)
-        return None
-    
-    def list_agents(self) -> list: 
-        """List all registered agents"""
+        return self.get(agent_name) if agent_name else None
+
+    def list_agents(self) -> list[str]:
         return list(self.agents.keys())
 
-class SubAgentBase:
-    """Base class for subagents"""
-    
-    def __init__(self, name: str):
-        self.name = name
-        self.config: Dict[str, Any] = {}
-    
-    async def execute(self, task: Dict[Any, Any]) -> Dict[Any, Any]:
-        """Execute task"""
-        return {"status": "success", "agent": self.name, "task": task}
-
-# Global registry instance
 registry = SubAgentRegistry()
 
 def init_registry() -> SubAgentRegistry:
-    """Initialize registry with default agents"""
-    for name in ["dev", "ads", "web", "content", "memory"]:
-        registry.register(name, SubAgentBase(name))
+    defaults = {
+        "dev": DevAgent("dev"),
+        "ads": AdsAgent("ads"),
+        "web": WebAgent("web"),
+        "content": ContentAgent("content"),
+        "memory": MemoryAgent("memory"),
+    }
+    for name, agent in defaults.items():
+        registry.register(name, agent)
     return registry
 
 def get_registry() -> SubAgentRegistry:
-    """Get global registry instance"""
     return registry
