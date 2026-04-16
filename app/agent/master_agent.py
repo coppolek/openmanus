@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict, Any
 from app.agent.manus import Manus
 from app.logger import logger
+from app.agent.subagent_registry import init_registry, get_registry
 
 class IntentRouter:
     def __init__(self):
@@ -54,11 +55,18 @@ class MasterAgent:
     async def initialize(self):
         self.manus = await Manus.create()
         self.tools.register("manus", self.manus)
+        init_registry()
         logger.info("MasterAgent initialized")
     
     async def run(self, prompt: str) -> Any:
         intent = self.router.route(prompt)
         self.memory.save("last_intent", intent)
+        route_name = {
+            "content_creation": "content",
+            "memory_management": "memory"
+        }.get(intent, intent)
+        subagent = get_registry().get(route_name)
+        self.memory.save("last_subagent", route_name if subagent else "general")
         
         plans = self.planner.plan(intent, {"prompt": prompt})
         for step in plans:
