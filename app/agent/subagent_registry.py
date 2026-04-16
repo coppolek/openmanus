@@ -53,6 +53,15 @@ class MemoryAgent(SubAgentBase):
             "task": task,
         }
 
+class GeneralAgent(SubAgentBase):
+    async def execute(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "status": "success",
+            "agent": self.name,
+            "action": "general_reasoning",
+            "task": task,
+        }
+
 class SubAgentRegistry:
     def __init__(self):
         self.agents: Dict[str, Any] = {}
@@ -62,6 +71,7 @@ class SubAgentRegistry:
             "/web": "web",
             "/content": "content",
             "/memory": "memory",
+            "/general": "general",
         }
 
     def register(self, name: str, agent: Any) -> None:
@@ -92,6 +102,7 @@ def init_registry() -> SubAgentRegistry:
         "web": WebAgent("web"),
         "content": ContentAgent("content"),
         "memory": MemoryAgent("memory"),
+        "general": GeneralAgent("general"),
     }
     for name, agent in defaults.items():
         registry.register(name, agent)

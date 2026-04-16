@@ -72,12 +72,13 @@ class MasterAgent:
             "content": "content",
             "memory_management": "memory",
             "memory": "memory",
+            "general": "general",
         }.get(intent, intent)
         subagent = get_registry().get(route_name)
         self.memory.save("last_subagent", route_name if subagent else "general")
         
         plans = self.planner.plan(intent, {"prompt": prompt})
-        if subagent and route_name != "general":
+        if subagent:
             result = await subagent.execute({
                 "prompt": prompt,
                 "intent": intent,
