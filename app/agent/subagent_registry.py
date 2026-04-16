@@ -28,12 +28,12 @@ class DevAgent(SubAgentBase):
             return "test_fix"
         if any(x in t for x in [
             "route", "routing", "agent", "intent", "registry",
-            "yönlendirme", "yonlendirme", "ajan", "intent", "registry"
+            "yönlendirme", "yonlendirme", "ajan", "registry"
         ]):
             return "agent_routing"
         if any(x in t for x in [
             "refactor", "cleanup", "simplify", "stabilize",
-            "refactor", "temizle", "sadeleştir", "sadelestir", "stabilize"
+            "temizle", "sadeleştir", "sadelestir", "stabilize"
         ]):
             return "refactor"
         return "general_dev"
@@ -66,42 +66,55 @@ class DevAgent(SubAgentBase):
         }
         return mapping.get(focus, mapping["general_dev"])
 
+    def _primary_target_file(self, focus: str, suspected_files: List[str]) -> str:
+        preferred = {
+            "build_fix": "app/agent/master_agent.py",
+            "test_fix": "app/agent/subagent_registry.py",
+            "agent_routing": "app/agent/master_agent.py",
+            "refactor": "app/agent/subagent_registry.py",
+            "general_dev": "app/agent/subagent_registry.py",
+        }
+        target = preferred.get(focus)
+        if target:
+            return target
+        return suspected_files[0] if suspected_files else "app/agent/subagent_registry.py"
+
     def _next_steps(self, focus: str) -> List[str]:
         plans = {
             "build_fix": [
                 "Read the failing area and identify the exact break point",
-                "Inspect the most likely Python files and imports",
+                "Inspect the most likely Python file and imports",
                 "Prepare the smallest safe code change",
                 "Run syntax/build validation",
-                "Review output and iterate only if needed",
+                "Review output and stop unless clearly needed",
             ],
             "test_fix": [
                 "Read the failing test and isolate the expectation",
                 "Inspect the implementation used by that test",
-                "Apply the smallest logic correction",
-                "Run the relevant test subset",
-                "Review regressions before broader validation",
+                "Prepare the smallest logic correction",
+                "Run the relevant validation command",
+                "Stop if the change spreads beyond the target file",
             ],
             "agent_routing": [
-                "Inspect intent mapping and subagent routing flow",
-                "Identify where the prompt is misclassified or dropped",
-                "Patch the routing logic with minimal blast radius",
-                "Run focused routing prompts as validation",
+                "Inspect intent mapping and route selection",
+                "Identify where classification or handoff fails",
+                "Prepare a minimal routing-only patch",
+                "Run focused routing validation",
                 "Confirm specialized agents still behave correctly",
             ],
             "refactor": [
                 "Identify duplicated or unstable logic",
                 "Choose the smallest structural cleanup",
-                "Preserve external behavior while simplifying internals",
+                "Preserve external behavior",
                 "Run focused validation after cleanup",
                 "Stop if behavior changes unexpectedly",
             ],
             "general_dev": [
-                "Clarify the requested engineering outcome",
-                "Inspect the most relevant source files",
-                "Prepare a minimal safe patch plan",
-                "Define validation commands before editing",
-                "Apply and verify in small steps",
+                "Clarify the engineering outcome",
+                "Inspect the primary target file",
+                "Prepare a minimal single-file patch",
+                "Define validation before applying",
+                "Stop if the edit grows beyond scope",
             ],
         }
         return plans.get(focus, plans["general_dev"])
@@ -121,7 +134,7 @@ class DevAgent(SubAgentBase):
         t = prompt.lower()
         high_words = [
             "delete", "drop", "wipe", "production", "secret", "token", "auth", "security",
-            "sil", "canlı", "canli", "token", "gizli", "kimlik"
+            "sil", "canlı", "canli", "gizli", "kimlik"
         ]
         medium_words = [
             "routing", "agent", "build", "dependency", "test", "refactor",
@@ -135,80 +148,90 @@ class DevAgent(SubAgentBase):
 
     def _patch_strategy(self, focus: str) -> str:
         strategies = {
-            "build_fix": "Limit changes to imports, references, and minimal dependency-related edits.",
-            "test_fix": "Limit changes to the failing logic path and preserve external behavior.",
-            "agent_routing": "Limit changes to intent mapping, route selection, and registry wiring only.",
-            "refactor": "Prefer structural cleanup without changing public behavior.",
+            "build_fix": "Limit edits to imports, references, and small dependency-related fixes in one file.",
+            "test_fix": "Limit edits to the failing logic path while preserving external behavior.",
+            "agent_routing": "Limit edits to intent mapping, route selection, and agent handoff logic in one file first.",
+            "refactor": "Prefer the smallest cleanup that reduces duplication without changing public behavior.",
             "general_dev": "Prefer the smallest local edit with explicit validation before any broader change.",
         }
         return strategies.get(focus, strategies["general_dev"])
 
-    def _edit_scope(self, focus: str) -> Dict[str, Any]:
+    def _allowed_operations(self, focus: str) -> List[str]:
+        ops = [
+            "targeted_replace",
+            "small_logic_adjustment",
+            "import_fix",
+            "mapping_fix",
+        ]
+        if focus == "refactor":
+            ops.append("small_cleanup")
+        return ops
+
+    def _preflight_checks(self, target_file: str) -> List[str]:
+        return [
+            f"test -f {target_file}",
+            f"python3 -m py_compile {target_file}" if target_file.endswith(".py") else "true",
+        ]
+
+    def _postflight_checks(self, focus: str) -> List[str]:
+        checks = []
+        if focus in {"build_fix", "agent_routing", "general_dev", "refactor", "test_fix"}:
+            checks.extend([
+                "python3 -m py_compile app/agent/subagent_registry.py",
+                "python3 -m py_compile app/agent/master_agent.py",
+            ])
+        if focus == "test_fix":
+            checks.append("pytest -q")
+        return checks
+
+    def _rollback_plan(self, target_file: str) -> Dict[str, str]:
         return {
-            "mode": "dry_run",
-            "max_files": 2 if focus in {"agent_routing", "refactor", "general_dev"} else 3,
-            "allow_new_files": False,
-            "allow_delete": False,
-            "allow_network": False,
-            "allow_secrets_access": False,
+            "backup_style": "copy_before_edit",
+            "backup_file": f"{target_file}.bak",
+            "restore_command": f"cp {target_file}.bak {target_file}",
         }
 
     def _stop_conditions(self, risk_level: str) -> List[str]:
         base = [
-            "Stop if more than the expected files need to change",
-            "Stop if validation fails before edit planning is complete",
-            "Stop if the requested change implies broad refactoring",
+            "Stop if more than one primary source file needs editing",
+            "Stop if validation fails before patching",
+            "Stop if the requested fix implies broad refactoring",
+            "Stop if the target file is unclear",
         ]
         if risk_level == "high":
             base.extend([
                 "Stop before any production-facing or credential-related action",
-                "Stop if rollback is not clearly defined",
+                "Stop if rollback is not clearly available",
             ])
         return base
 
-    def _dry_run_patch_plan(self, focus: str, suspected_files: List[str]) -> List[Dict[str, str]]:
-        first = suspected_files[0] if suspected_files else "app/agent/subagent_registry.py"
+    def _single_file_patch_plan(self, focus: str, target_file: str) -> Dict[str, str]:
         plans = {
-            "build_fix": [
-                {
-                    "target_file": first,
-                    "change_type": "inspect_imports_and_references",
-                    "reason": "Build issues are usually caused by broken imports, names, or dependency assumptions."
-                }
-            ],
-            "test_fix": [
-                {
-                    "target_file": first,
-                    "change_type": "inspect_failing_logic_path",
-                    "reason": "The smallest safe change is usually close to the failing assertion path."
-                }
-            ],
-            "agent_routing": [
-                {
-                    "target_file": "app/agent/master_agent.py",
-                    "change_type": "inspect_intent_mapping",
-                    "reason": "Routing bugs often originate in intent-to-agent mapping."
-                },
-                {
-                    "target_file": "app/agent/subagent_registry.py",
-                    "change_type": "inspect_registry_and_agent_contracts",
-                    "reason": "Routing can fail if registry names or returned structures drift."
-                }
-            ],
-            "refactor": [
-                {
-                    "target_file": first,
-                    "change_type": "inspect_duplicate_or_unstable_logic",
-                    "reason": "Refactor work should start from the smallest repeated or fragile section."
-                }
-            ],
-            "general_dev": [
-                {
-                    "target_file": first,
-                    "change_type": "inspect_primary_execution_path",
-                    "reason": "Start with the most likely file before considering wider edits."
-                }
-            ],
+            "build_fix": {
+                "target_file": target_file,
+                "edit_intent": "Fix imports, references, or small build-breaking logic in a single file.",
+                "apply_mode": "single_file_only",
+            },
+            "test_fix": {
+                "target_file": target_file,
+                "edit_intent": "Adjust the smallest failing logic path in a single file.",
+                "apply_mode": "single_file_only",
+            },
+            "agent_routing": {
+                "target_file": target_file,
+                "edit_intent": "Fix routing or intent mapping in a single file before considering any second file.",
+                "apply_mode": "single_file_only",
+            },
+            "refactor": {
+                "target_file": target_file,
+                "edit_intent": "Apply the smallest structural cleanup without changing public behavior.",
+                "apply_mode": "single_file_only",
+            },
+            "general_dev": {
+                "target_file": target_file,
+                "edit_intent": "Prepare the smallest safe patch in one file.",
+                "apply_mode": "single_file_only",
+            },
         }
         return plans.get(focus, plans["general_dev"])
 
@@ -219,18 +242,22 @@ class DevAgent(SubAgentBase):
 
         focus = self._infer_dev_focus(prompt)
         suspected_files = self._suspected_files(focus)
+        primary_target_file = self._primary_target_file(focus, suspected_files)
         next_steps = self._next_steps(focus)
         validation_commands = self._validation_commands(focus)
         risk_level = self._risk_level(prompt)
         patch_strategy = self._patch_strategy(focus)
-        edit_scope = self._edit_scope(focus)
+        allowed_operations = self._allowed_operations(focus)
+        preflight_checks = self._preflight_checks(primary_target_file)
+        postflight_checks = self._postflight_checks(focus)
+        rollback_plan = self._rollback_plan(primary_target_file)
         stop_conditions = self._stop_conditions(risk_level)
-        dry_run_patch_plan = self._dry_run_patch_plan(focus, suspected_files)
+        single_file_patch_plan = self._single_file_patch_plan(focus, primary_target_file)
 
         summary = (
             f"Development request classified as {focus}. "
             f"Goal: {prompt or 'unspecified development task'}. "
-            f"This agent is currently in dry-run mode and will only prepare a safe patch plan."
+            f"This agent is now preparing a controlled single-file patch plan."
         )
 
         return {
@@ -239,11 +266,15 @@ class DevAgent(SubAgentBase):
             "action": "build_or_fix",
             "summary": summary,
             "focus": focus,
-            "execution_mode": "dry_run",
+            "execution_mode": "controlled_single_file_patch_plan",
+            "primary_target_file": primary_target_file,
             "suspected_files": suspected_files,
             "patch_strategy": patch_strategy,
-            "dry_run_patch_plan": dry_run_patch_plan,
-            "edit_scope": edit_scope,
+            "allowed_operations": allowed_operations,
+            "single_file_patch_plan": single_file_patch_plan,
+            "preflight_checks": preflight_checks,
+            "postflight_checks": postflight_checks,
+            "rollback_plan": rollback_plan,
             "next_steps": next_steps,
             "validation_commands": validation_commands,
             "stop_conditions": stop_conditions,
