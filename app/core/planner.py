@@ -1,214 +1,184 @@
-"""Planner module for task decomposition and execution planning."""
+"""Task planner for breaking down complex tasks into steps."""
 
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 from app.logger import logger
 
 
-class TaskNode(BaseModel):
-    """Represents a single task in the execution plan."""
+class TaskStep(BaseModel):
+    """Represents a single step in a task plan."""
     
-    id: str
-    name: str
-    description: str
-    dependencies: List[str] = Field(default_factory=list)
-    status: str = "pending"  # pending, running, completed, failed
-    result: Optional[Any] = None
+    step_number: int = Field(description="Step number in sequence")
+    description: str = Field(description="Description of what to do")
+    tool_hint: Optional[str] = Field(default=None, description="Suggested tool to use")
+    dependencies: List[int] = Field(default_factory=list, description="Step numbers this depends on")
+    completed: bool = Field(default=False)
+
+
+class TaskPlan(BaseModel):
+    """Represents a complete task plan."""
+    
+    goal: str = Field(description="Overall goal of the plan")
+    steps: List[TaskStep] = Field(default_factory=list)
+    current_step: int = Field(default=0)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class ExecutionPlan(BaseModel):
-    """Represents a complete execution plan."""
+class Planner(BaseModel):
+    """Creates and manages task plans."""
     
-    id: str
-    goal: str
-    tasks: List[TaskNode]
-    current_task_id: Optional[str] = None
-    status: str = "pending"  # pending, running, completed, failed
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-
-
-class Planner:
-    """Planner for decomposing goals into executable tasks."""
+    max_steps: int = Field(default=10, description="Maximum number of steps in a plan")
+    current_plan: Optional[TaskPlan] = Field(default=None)
     
-    def __init__(self):
-        """Initialize the planner."""
-        self.current_plan: Optional[ExecutionPlan] = None
-        self.plan_history: List[ExecutionPlan] = []
-        logger.info("Planner initialized")
-    
-    async def create_plan(self, goal: str, context: Optional[Dict[str, Any]] = None) -> ExecutionPlan:
-        """Create an execution plan from a goal.
+    def create_plan(self, goal: str, context: Optional[Dict[str, Any]] = None) -> TaskPlan:
+        """Create a task plan for the given goal."""
+        # Simple heuristic-based planning for now
+        steps = []
         
-        Args:
-            goal: The high-level goal to achieve
-            context: Optional context information
-            
-        Returns:
-            ExecutionPlan: The generated execution plan
-        """
-        logger.info(f"Creating plan for goal: {goal}")
+        goal_lower = goal.lower()
         
-        # For now, create a simple single-task plan
-        # This will be enhanced with LLM-based decomposition
-        plan = ExecutionPlan(
-            id=f"plan_{hash(goal) % 10000}",
-            goal=goal,
-            tasks=[
-                TaskNode(
-                    id="task_1",
-                    name="Execute Goal",
-                    description=goal,
-                    dependencies=[],
-                    status="pending"
+        if "write" in goal_lower or "create" in goal_lower:
+            if "file" in goal_lower:
+                steps.append(
+                    TaskStep(
+                        step_number=1,
+                        description="Determine file path and content requirements",
+                        tool_hint="ask_human"
+                    )
                 )
-            ],
-            status="pending",
+                steps.append(
+                    TaskStep(
+                        step_number=2,
+                        description="Create or edit the file",
+                        tool_hint="str_replace_editor",
+                        dependencies=[1]
+                    )
+                )
+            elif "code" in goal_lower or "function" in goal_lower:
+                steps.append(
+                    TaskStep(
+                        step_number=1,
+                        description="Analyze requirements and design solution",
+                        tool_hint="python_execute"
+                    )
+                )
+                steps.append(
+                    TaskStep(
+                        step_number=2,
+                        description="Implement the code",
+                        tool_hint="str_replace_editor",
+                        dependencies=[1]
+                    )
+                )
+                steps.append(
+                    TaskStep(
+                        step_number=3,
+                        description="Test the implementation",
+                        tool_hint="python_execute",
+                        dependencies=[2]
+                    )
+                )
+        
+        elif "search" in goal_lower or "find" in goal_lower:
+            steps.append(
+                TaskStep(
+                    step_number=1,
+                    description="Perform web search",
+                    tool_hint="browser_use"
+                )
+            )
+            steps.append(
+                TaskStep(
+                    step_number=2,
+                    description="Extract and summarize results",
+                    dependencies=[1]
+                )
+            )
+        
+        elif "analyze" in goal_lower:
+            steps.append(
+                TaskStep(
+                    step_number=1,
+                    description="Load and prepare data",
+                    tool_hint="python_execute"
+                )
+            )
+            steps.append(
+                TaskStep(
+                    step_number=2,
+                    description="Perform analysis",
+                    tool_hint="python_execute",
+                    dependencies=[1]
+                )
+            )
+            if "visualize" in goal_lower or "plot" in goal_lower:
+                steps.append(
+                    TaskStep(
+                        step_number=3,
+                        description="Create visualizations",
+                        tool_hint="python_execute",
+                        dependencies=[2]
+                    )
+                )
+        
+        # Default fallback step if no specific steps were created
+        if not steps:
+            steps.append(
+                TaskStep(
+                    step_number=1,
+                    description="Execute the requested task"
+                )
+            )
+        
+        plan = TaskPlan(
+            goal=goal,
+            steps=steps,
             metadata=context or {}
         )
         
         self.current_plan = plan
-        self.plan_history.append(plan)
+        logger.info(f"Created plan with {len(steps)} steps for goal: {goal}")
         
-        logger.info(f"Created plan with {len(plan.tasks)} tasks")
         return plan
     
-    async def decompose_task(self, task: TaskNode) -> List[TaskNode]:
-        """Decompose a task into subtasks if needed.
-        
-        Args:
-            task: The task to decompose
-            
-        Returns:
-            List[TaskNode]: List of subtasks (or original task if no decomposition needed)
-        """
-        logger.debug(f"Decomposing task: {task.name}")
-        
-        # For now, return the task as-is
-        # This will be enhanced with intelligent decomposition logic
-        return [task]
-    
-    async def get_next_task(self) -> Optional[TaskNode]:
-        """Get the next task to execute from the current plan.
-        
-        Returns:
-            Optional[TaskNode]: The next task to execute, or None if no tasks available
-        """
+    def get_next_step(self) -> Optional[TaskStep]:
+        """Get the next uncompleted step in the current plan."""
         if not self.current_plan:
-            logger.warning("No current plan available")
             return None
         
-        # Find the first pending task with all dependencies completed
-        for task in self.current_plan.tasks:
-            if task.status == "pending":
-                # Check if all dependencies are completed
-                deps_completed = all(
-                    t.status == "completed" 
-                    for t in self.current_plan.tasks 
-                    if t.id in task.dependencies
-                )
-                if deps_completed:
-                    logger.info(f"Next task: {task.name}")
-                    return task
+        for step in self.current_plan.steps:
+            # Check if dependencies are completed
+            deps_completed = all(
+                self.current_plan.steps[dep - 1].completed 
+                for dep in step.dependencies
+            )
+            
+            if not step.completed and deps_completed:
+                return step
         
-        logger.info("No pending tasks available")
         return None
     
-    async def update_task_status(
-        self, 
-        task_id: str, 
-        status: str, 
-        result: Optional[Any] = None
-    ) -> bool:
-        """Update the status of a task.
-        
-        Args:
-            task_id: The ID of the task to update
-            status: The new status
-            result: Optional result data
-            
-        Returns:
-            bool: True if update successful, False otherwise
-        """
+    def mark_step_completed(self, step_number: int) -> bool:
+        """Mark a step as completed."""
         if not self.current_plan:
-            logger.error("No current plan to update")
             return False
         
-        for task in self.current_plan.tasks:
-            if task.id == task_id:
-                task.status = status
-                if result is not None:
-                    task.result = result
-                logger.info(f"Updated task {task_id} status to {status}")
-                
-                # Update plan status if needed
-                self._update_plan_status()
+        for step in self.current_plan.steps:
+            if step.step_number == step_number:
+                step.completed = True
+                logger.info(f"Marked step {step_number} as completed")
                 return True
         
-        logger.error(f"Task {task_id} not found in current plan")
         return False
     
-    def _update_plan_status(self):
-        """Update the overall plan status based on task statuses."""
+    def is_plan_complete(self) -> bool:
+        """Check if all steps in the current plan are completed."""
         if not self.current_plan:
-            return
+            return True
         
-        all_completed = all(t.status == "completed" for t in self.current_plan.tasks)
-        any_failed = any(t.status == "failed" for t in self.current_plan.tasks)
-        any_running = any(t.status == "running" for t in self.current_plan.tasks)
-        
-        if all_completed:
-            self.current_plan.status = "completed"
-            logger.info("Plan completed successfully")
-        elif any_failed:
-            self.current_plan.status = "failed"
-            logger.warning("Plan failed due to task failure")
-        elif any_running:
-            self.current_plan.status = "running"
-        else:
-            self.current_plan.status = "pending"
+        return all(step.completed for step in self.current_plan.steps)
     
-    async def replan(self, reason: str) -> Optional[ExecutionPlan]:
-        """Create a new plan based on current state.
-        
-        Args:
-            reason: The reason for replanning
-            
-        Returns:
-            Optional[ExecutionPlan]: The new plan, or None if replanning failed
-        """
-        logger.info(f"Replanning due to: {reason}")
-        
-        if not self.current_plan:
-            logger.error("No current plan to replan from")
-            return None
-        
-        # For now, just mark the current plan as failed and return None
-        # This will be enhanced with intelligent replanning logic
-        self.current_plan.status = "failed"
-        self.current_plan.metadata["replan_reason"] = reason
-        
-        logger.warning("Replanning not yet fully implemented")
-        return None
-    
-    def get_plan_summary(self) -> Dict[str, Any]:
-        """Get a summary of the current plan.
-        
-        Returns:
-            Dict[str, Any]: Summary information about the current plan
-        """
-        if not self.current_plan:
-            return {"status": "no_plan"}
-        
-        completed_tasks = sum(1 for t in self.current_plan.tasks if t.status == "completed")
-        total_tasks = len(self.current_plan.tasks)
-        
-        return {
-            "plan_id": self.current_plan.id,
-            "goal": self.current_plan.goal,
-            "status": self.current_plan.status,
-            "progress": f"{completed_tasks}/{total_tasks}",
-            "completed_tasks": completed_tasks,
-            "total_tasks": total_tasks,
-            "current_task": self.current_plan.current_task_id
-        }
+    def reset_plan(self) -> None:
+        """Reset the current plan."""
+        self.current_plan = None
+        logger.info("Plan reset")
