@@ -143,23 +143,10 @@ class Manus(ToolCallAgent):
             await self.initialize_mcp_servers()
             self._initialized = True
 
-        original_prompt = self.next_step_prompt
-        recent_messages = self.memory.messages[-3:] if self.memory.messages else []
-        browser_in_use = any(
-            tc.function.name == BrowserUseTool().name
-            for msg in recent_messages
-            if msg.tool_calls
-            for tc in msg.tool_calls
-        )
-
-        if browser_in_use:
-            self.next_step_prompt = (
-                await self.browser_context_helper.format_next_step_prompt()
-            )
-
+        # Note: We intentionally do NOT override next_step_prompt here.
+        # Manus uses the standard ToolCallAgent prompt for tool selection.
+        # The BrowserAgent-specific prompt is designed for JSON responses,
+        # which conflicts with our tool selection interface.
+        # When browser fails, we want to switch to other tools using our normal mechanism.
         result = await super().think()
-
-        # Restore original prompt
-        self.next_step_prompt = original_prompt
-
         return result

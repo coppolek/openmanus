@@ -1,4 +1,11 @@
 repos:
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args:
+          ["--profile", "black", "--filter-files", "--lines-after-imports=2"]
+
   - repo: https://github.com/psf/black
     rev: 23.1.0
     hooks:
@@ -28,10 +35,3 @@ repos:
             --exclude=__init__.py,
           ]
         files: \.py$
-
-  - repo: https://github.com/pycqa/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        args:
-          ["--profile", "black", "--filter-files", "--lines-after-imports=2"]
