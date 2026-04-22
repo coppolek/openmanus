@@ -1,13 +1,11 @@
-FROM python:3.12-slim
-
-WORKDIR /app/OpenManus
-
-RUN apt-get update && apt-get install -y --no-install-recommends git curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && (command -v uv >/dev/null 2>&1 || pip install --no-cache-dir uv)
-
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY package*.json ./
+RUN npm install
 COPY . .
+RUN npm run build
 
-RUN uv pip install --system -r requirements.txt
-
-CMD ["bash"]
+FROM nginx:alpine
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
